@@ -86,7 +86,7 @@ def token_status():
 def create_doctor():
     data = request.get_json()
     #TODO: Внедрить сюда логику с генерацией рандомного пароля и отправки его на почту.
-    default_password="123456"
+    default_password = "123456"
     try:
         # Создаем пользователя
         new_user = Users(
@@ -95,7 +95,7 @@ def create_doctor():
             role='doctor',
             approved=False
         )
-        new_user.set_password(data['password'])
+        new_user.set_password(default_password)
         db.session.add(new_user)
         db.session.commit()
 
@@ -135,4 +135,53 @@ def user_name():
         else:
             return jsonify({'message': 'Invalid full name format'}), 400
     return jsonify({'message': 'User not found'}), 404
+
+@bp.route('/doctors', methods=['GET'])
+@role_and_approval_required('manager')
+def get_all_doctors():
+    doctors = Doctors.query.all()
+    result = []
+    for doctor in doctors:
+        user = Users.query.get(doctor.user_id)
+        doctor_data = {
+            'id': doctor.id,
+            'full_name': user.full_name,
+            'email': user.email,
+            'experience': doctor.experience,
+            'modality': doctor.modality,
+            'additional_modality': doctor.additional_modality,
+            'rate': doctor.rate,
+            'status': doctor.status,
+            'phone': doctor.phone
+        }
+        result.append(doctor_data)
+    return jsonify(result), 200
+
+@bp.route('/doctor/<int:doctor_id>', methods=['DELETE'])
+@role_and_approval_required('manager')
+def delete_doctor(doctor_id):
+    doctor = Doctors.query.get(doctor_id)
+    if not doctor:
+        return jsonify({'message': 'Doctor not found'}), 404
+    user = Users.query.get(doctor.user_id)
+    db.session.delete(doctor)
+    db.session.delete(user)
+    db.session.commit()
+    return jsonify({'message': 'Doctor deleted successfully'}), 200
+
+@bp.route('/doctor/approve/<int:doctor_id>', methods=['PUT'])
+@role_and_approval_required('manager')
+def approve_doctor(doctor_id):
+    doctor = Doctors.query.get(doctor_id)
+    if not doctor:
+        return jsonify({'message': 'Doctor not found'}), 404
+    user = Users.query.get(doctor.user_id)
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+
+    user.approved = True
+    doctor.status = 'Активный'
+    db.session.commit()
+
+    return jsonify({'message': 'Doctor approved successfully'}), 200
 
