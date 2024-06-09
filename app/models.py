@@ -1,9 +1,11 @@
+import uuid
+from sqlalchemy.dialects.postgresql import UUID
 from app import db
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 
 class Users(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     full_name = db.Column(db.String(255), nullable=False)
     email = db.Column(db.String(255), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
@@ -20,8 +22,8 @@ class Users(db.Model):
     doctors = db.relationship('Doctors', backref='user', uselist=False)
 
 class Doctors(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id'), nullable=False)
     experience = db.Column(db.String(255), nullable=False)
     main_modality_id = db.Column(db.Integer, db.ForeignKey('modality.id'), nullable=False)
     gender = db.Column(db.String(255), nullable=False)
@@ -36,5 +38,16 @@ class Modality(db.Model):
 
 class DoctorAdditionalModalities(db.Model):
     __tablename__ = 'doctor_additional_modalities'
-    doctor_id = db.Column(db.Integer, db.ForeignKey('doctors.id'), primary_key=True)
+    doctor_id = db.Column(UUID(as_uuid=True), db.ForeignKey('doctors.id'), primary_key=True)
     modality_id = db.Column(db.Integer, db.ForeignKey('modality.id'), primary_key=True)
+
+class DoctorSchedule(db.Model):
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    doctor_id = db.Column(UUID(as_uuid=True), db.ForeignKey('doctors.id'), nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    start_time = db.Column(db.Time, nullable=False)
+    end_time = db.Column(db.Time, nullable=False)
+    break_minutes = db.Column(db.Integer, nullable=False)
+    hours_worked = db.Column(db.Float, nullable=False)
+
+    doctor = db.relationship('Doctors', backref=db.backref('schedules', lazy=True))
