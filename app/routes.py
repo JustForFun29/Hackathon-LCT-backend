@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
 from app import db, revoked_tokens
-from app.models import Users, Doctors
+from app.models import Users, Doctors, Modality, DoctorAdditionalModalities
 from flask_jwt_extended import (
     create_access_token,
     jwt_required,
@@ -8,7 +8,7 @@ from flask_jwt_extended import (
     get_jwt,
     decode_token
 )
-from app.decorators import role_and_approval_required, check_token_not_revoked, hr_required
+from app.decorators import role_and_approval_required, check_token_not_revoked
 from datetime import timedelta
 from sqlalchemy.exc import IntegrityError
 
@@ -81,11 +81,10 @@ def token_status():
         return jsonify({'message': 'Token has been revoked'}), 401
     return jsonify({'message': 'Token is active'}), 200
 
-@bp.route('/create_doctor', methods=['POST'])
-@hr_required
+@bp.route('/hr/create_doctor', methods=['POST'])
+@role_and_approval_required('hr')
 def create_doctor():
     data = request.get_json()
-    #TODO: Внедрить сюда логику с генерацией рандомного пароля и отправки его на почту.
     default_password = "123456"
     try:
         # Создаем пользователя
@@ -93,22 +92,40 @@ def create_doctor():
             full_name=data['full_name'],
             email=data['email'],
             role='doctor',
-            approved=False
+            approved=True  # Устанавливаем значение approved равным True для доктора
         )
         new_user.set_password(default_password)
         db.session.add(new_user)
         db.session.commit()
 
+        # Найти или создать основную модальность
+        main_modality = Modality.query.filter_by(name=data['main_modality']).first()
+        if not main_modality:
+            main_modality = Modality(name=data['main_modality'])
+            db.session.add(main_modality)
+            db.session.commit()
+
         # Создаем запись в таблице doctors
         new_doctor = Doctors(
             user_id=new_user.id,
             experience=data['experience'],
-            modality=data['modality'],
-            additional_modality=data['additional_modality'],
+            main_modality_id=main_modality.id,
+            gender=data['gender'],
             rate=data['rate'],
             status='Ожидает подтверждения',  # Устанавливаем статус по умолчанию
             phone=data['phone']
         )
+
+        # Добавляем дополнительные модальности
+        additional_modalities = data.get('additional_modality', [])
+        for modality_name in additional_modalities:
+            modality = Modality.query.filter_by(name=modality_name).first()
+            if not modality:
+                modality = Modality(name=modality_name)
+                db.session.add(modality)
+                db.session.commit()
+            new_doctor.additional_modalities.append(modality)
+
         db.session.add(new_doctor)
         db.session.commit()
 
@@ -116,6 +133,63 @@ def create_doctor():
     except IntegrityError:
         db.session.rollback()
         return jsonify({'message': 'User with this email already exists'}), 400
+
+@bp.route('/doctors', methods=['GET'])
+@role_and_approval_required('manager', 'hr')
+def get_all_doctors():
+    doctors = Doctors.query.all()
+    result = []
+    for doctor in doctors:
+        user = Users.query.get(doctor.user_id)
+        main_modality = Modality.query.get(doctor.main_modality_id)
+        doctor_data = {
+            'id': doctor.id,
+            'full_name': user.full_name,
+            'email': user.email,
+            'experience': doctor.experience,
+            'main_modality': main_modality.name if main_modality else None,
+            'additional_modalities': [modality.name for modality in doctor.additional_modalities],
+            'rate': doctor.rate,
+            'status': doctor.status,
+            'phone': doctor.phone,
+            'gender': doctor.gender
+        }
+        result.append(doctor_data)
+    return jsonify(result), 200
+
+@bp.route('/manager/doctor/<int:doctor_id>', methods=['DELETE'])
+@role_and_approval_required('manager')
+def delete_doctor(doctor_id):
+    doctor = Doctors.query.get(doctor_id)
+    if not doctor:
+        return jsonify({'message': 'Doctor not found'}), 404
+    user = Users.query.get(doctor.user_id)
+
+    # Удаляем записи из таблицы doctor_additional_modalities
+    DoctorAdditionalModalities.query.filter_by(doctor_id=doctor.id).delete()
+
+    # Удаляем записи из таблиц doctors и users
+    db.session.delete(doctor)
+    db.session.delete(user)
+    db.session.commit()
+
+    return jsonify({'message': 'Doctor deleted successfully'}), 200
+
+@bp.route('/manager/doctor/approve/<int:doctor_id>', methods=['PUT'])
+@role_and_approval_required('manager')
+def approve_doctor(doctor_id):
+    doctor = Doctors.query.get(doctor_id)
+    if not doctor:
+        return jsonify({'message': 'Doctor not found'}), 404
+    user = Users.query.get(doctor.user_id)
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+
+    user.approved = True
+    doctor.status = 'Активный'
+    db.session.commit()
+
+    return jsonify({'message': 'Doctor approved successfully'}), 200
 
 @bp.route('/user_name', methods=['GET'])
 @jwt_required()
@@ -135,53 +209,3 @@ def user_name():
         else:
             return jsonify({'message': 'Invalid full name format'}), 400
     return jsonify({'message': 'User not found'}), 404
-
-@bp.route('/doctors', methods=['GET'])
-@role_and_approval_required('manager')
-def get_all_doctors():
-    doctors = Doctors.query.all()
-    result = []
-    for doctor in doctors:
-        user = Users.query.get(doctor.user_id)
-        doctor_data = {
-            'id': doctor.id,
-            'full_name': user.full_name,
-            'email': user.email,
-            'experience': doctor.experience,
-            'modality': doctor.modality,
-            'additional_modality': doctor.additional_modality,
-            'rate': doctor.rate,
-            'status': doctor.status,
-            'phone': doctor.phone
-        }
-        result.append(doctor_data)
-    return jsonify(result), 200
-
-@bp.route('/doctor/<int:doctor_id>', methods=['DELETE'])
-@role_and_approval_required('manager')
-def delete_doctor(doctor_id):
-    doctor = Doctors.query.get(doctor_id)
-    if not doctor:
-        return jsonify({'message': 'Doctor not found'}), 404
-    user = Users.query.get(doctor.user_id)
-    db.session.delete(doctor)
-    db.session.delete(user)
-    db.session.commit()
-    return jsonify({'message': 'Doctor deleted successfully'}), 200
-
-@bp.route('/doctor/approve/<int:doctor_id>', methods=['PUT'])
-@role_and_approval_required('manager')
-def approve_doctor(doctor_id):
-    doctor = Doctors.query.get(doctor_id)
-    if not doctor:
-        return jsonify({'message': 'Doctor not found'}), 404
-    user = Users.query.get(doctor.user_id)
-    if not user:
-        return jsonify({'message': 'User not found'}), 404
-
-    user.approved = True
-    doctor.status = 'Активный'
-    db.session.commit()
-
-    return jsonify({'message': 'Doctor approved successfully'}), 200
-

@@ -4,7 +4,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required, get_jwt
 from app.models import Users
 from app import revoked_tokens
 
-def role_and_approval_required(required_role):
+def role_and_approval_required(*required_roles):
     def decorator(f):
         @wraps(f)
         @jwt_required()
@@ -12,7 +12,7 @@ def role_and_approval_required(required_role):
         def decorated_function(*args, **kwargs):
             current_user = get_jwt_identity()
             user = Users.query.filter_by(email=current_user['email']).first()
-            if user.role != required_role or not user.approved:
+            if user.role not in required_roles or not user.approved:
                 return jsonify({'message': 'Access denied'}), 403
             return f(*args, **kwargs)
         return decorated_function
@@ -28,14 +28,3 @@ def check_token_not_revoked(f):
         return f(*args, **kwargs)
     return decorated_function
 
-def hr_required(f):
-    @wraps(f)
-    @jwt_required()
-    @check_token_not_revoked
-    def decorated_function(*args, **kwargs):
-        current_user = get_jwt_identity()
-        user = Users.query.filter_by(email=current_user['email']).first()
-        if user.role != 'HR':
-            return jsonify({'message': 'Access denied'}), 403
-        return f(*args, **kwargs)
-    return decorated_function

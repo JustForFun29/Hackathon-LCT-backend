@@ -23,8 +23,18 @@ class Doctors(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     experience = db.Column(db.String(255), nullable=False)
-    modality = db.Column(db.String(255), nullable=False)
-    additional_modality = db.Column(db.String(255), nullable=True)
+    main_modality_id = db.Column(db.Integer, db.ForeignKey('modality.id'), nullable=False)
+    gender = db.Column(db.String(255), nullable=False)
     rate = db.Column(db.Float, nullable=False)
     status = db.Column(db.String(255), default='Ожидает подтверждения', nullable=False)
     phone = db.Column(db.String(255), nullable=False)
+    additional_modalities = db.relationship('Modality', secondary='doctor_additional_modalities', backref=db.backref('doctors', lazy='dynamic'))
+
+class Modality(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), unique=True, nullable=False)
+
+class DoctorAdditionalModalities(db.Model):
+    __tablename__ = 'doctor_additional_modalities'
+    doctor_id = db.Column(db.Integer, db.ForeignKey('doctors.id'), primary_key=True)
+    modality_id = db.Column(db.Integer, db.ForeignKey('modality.id'), primary_key=True)
