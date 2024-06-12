@@ -1,27 +1,64 @@
 import uuid
-from flask import Blueprint, jsonify, request
-from app import db
-from app.models import Users, Doctors, Modality, DoctorAdditionalModalities, DoctorSchedule
+import string
+import random
+from flask import Blueprint, jsonify, request, current_app
+from app import db, mail
+from app.models import Users, Doctors, Modality, DoctorAdditionalModalities, DoctorSchedule, Ticket
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.decorators import role_and_approval_required, check_token_not_revoked
 from datetime import datetime, timedelta
 from sqlalchemy.exc import IntegrityError
+from flask_mail import Message
+import logging
 
 hr_bp = Blueprint('hr', __name__)
 
+# Настраиваем логирование
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s:%(message)s')
+
+def generate_random_password(length=8):
+    letters_and_digits = string.ascii_letters + string.digits
+    return ''.join(random.choice(letters_and_digits) for i in range(length))
+
+def send_email(to, subject, template):
+    msg = Message(
+        subject,
+        recipients=[to],
+        html=template,
+        sender="hello@such.ae"
+    )
+    mail.send(msg)
+
+
+@hr_bp.route('/email', methods=['POST'])
+@role_and_approval_required('hr')
+def email_test():
+    data = request.get_json()
+    try:
+        # Отправляем уведомление по электронной почте
+        subject = "Был создан запрос на создание аккаунта"
+        to = 'dimashumbetzhan@gmail.com'
+        template = f"""
+                       <p>Дождитесь активации вашего аккаунта после утверждения руководителя!</p>
+                       """
+        send_email(to, subject, template)
+        return jsonify({'message': 'success!'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'message': str(e)}), 400
 @hr_bp.route('/create_doctor', methods=['POST'])
 @role_and_approval_required('hr')
 def hr_create_doctor():
     data = request.get_json()
-    default_password = "123456"
     try:
+        password = generate_random_password()
         new_user = Users(
             full_name=data['full_name'],
             email=data['email'],
             role='doctor',
             approved=False
         )
-        new_user.set_password(default_password)
+        new_user.set_password(password)
         db.session.add(new_user)
         db.session.commit()
 
@@ -53,10 +90,39 @@ def hr_create_doctor():
         db.session.add(new_doctor)
         db.session.commit()
 
-        return jsonify({'message': 'Doctor created successfully'}), 201
-    except IntegrityError:
+        # Создаем тикет для подтверждения доктора
+        new_ticket = Ticket(
+            user_id=new_user.id,
+            type='approve_doctor',
+            data={},
+            status='Ожидает'
+        )
+        db.session.add(new_ticket)
+        db.session.commit()
+
+        # Отправляем уведомление по электронной почте
+        subject = "Был создан запрос на создание аккаунта"
+        to = data['email']
+        template = f"""
+               <p>Уважаемый {data['full_name']},</p>
+               <p>Сотрудник Кадрового Отдела создал запрос на активацию вашего аккаунта в системе</p>
+               <p>Ваш логин {data['email']}</p>
+               <p>Ваш пароль {password}<p>
+               <p>Дождитесь активации вашего аккаунта после утверждения руководителя!</p>
+               """
+        send_email(to, subject, template)
+
+        return jsonify({'message': 'Doctor created successfully and approval ticket generated'}), 201
+    except IntegrityError as e:
         db.session.rollback()
-        return jsonify({'message': 'User with this email already exists'}), 400
+        if 'users_email_key' in str(e.orig):
+            return jsonify({'message': 'User with this email already exists'}), 400
+        logging.error(f"IntegrityError: {str(e)}")
+        return jsonify({'message': 'Database integrity error occurred', 'error': str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error: {str(e)}")
+        return jsonify({'message': 'An error occurred', 'error': str(e)}), 500
 
 @hr_bp.route('/doctor/<uuid:doctor_id>/schedule', methods=['POST'])
 @role_and_approval_required('hr')

@@ -3,9 +3,12 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager
 from flask_cors import CORS
 from .config import Config
+from flask_mail import Mail
+import simplejson as json
 
 db = SQLAlchemy()
 jwt = JWTManager()
+mail = Mail()
 
 revoked_tokens = set()
 
@@ -15,6 +18,7 @@ def create_app():
 
     db.init_app(app)
     jwt.init_app(app)
+    mail.init_app(app)
 
     # Инициализация CORS для всего приложения
     CORS(app, resources={r"/*": {"origins": "*"}})
