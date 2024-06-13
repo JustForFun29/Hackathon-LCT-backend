@@ -27,7 +27,7 @@ def send_email(to, subject, template):
     mail.send(msg)
 
 def generate_random_password(length=12):
-    characters = string.ascii_letters + string.digits + string.punctuation
+    characters = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
     password = ''.join(random.choice(characters) for i in range(length))
     return password
 
@@ -92,18 +92,17 @@ def delete_ticket(ticket_id):
 
 @managers_bp.route('/create_doctor', methods=['POST'])
 @role_and_approval_required('manager')
-def manager_create_doctor():
+def hr_create_doctor():
     data = request.get_json()
-    #TODO: Добавить логику для создания рандомного пароля и отправки его по имейлу
-    default_password = "123456"
     try:
+        password = generate_random_password()
         new_user = Users(
             full_name=data['full_name'],
             email=data['email'],
             role='doctor',
             approved=True
         )
-        new_user.set_password(default_password)
+        new_user.set_password(password)
         db.session.add(new_user)
         db.session.commit()
 
@@ -135,10 +134,29 @@ def manager_create_doctor():
         db.session.add(new_doctor)
         db.session.commit()
 
-        return jsonify({'message': 'Doctor created successfully'}), 201
-    except IntegrityError:
+        # Отправляем уведомление по электронной почте
+        subject = "Был создан аккаунт"
+        to = data['email']
+        template = f"""
+               <p>Уважаемый {data['full_name']},</p>
+               <p>Руководитель медицинского центра создал аккаунта в системе</p>
+               <p>Ваш логин {data['email']}</p>
+               <p>Ваш пароль {password}<p>
+               <p>Вы можете войти на наш сервис используя эти данные</p>
+               """
+        send_email(to, subject, template)
+
+        return jsonify({'message': 'Doctor created successfully and approval ticket generated'}), 201
+    except IntegrityError as e:
         db.session.rollback()
-        return jsonify({'message': 'User with this email already exists'}), 400
+        if 'users_email_key' in str(e.orig):
+            return jsonify({'message': 'User with this email already exists'}), 400
+        logging.error(f"IntegrityError: {str(e)}")
+        return jsonify({'message': 'Database integrity error occurred', 'error': str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error: {str(e)}")
+        return jsonify({'message': 'An error occurred', 'error': str(e)}), 500
 
 @managers_bp.route('/doctor/<uuid:doctor_id>', methods=['DELETE'])
 @role_and_approval_required('manager')
@@ -179,25 +197,88 @@ def get_all_doctors():
         result.append(doctor_data)
     return jsonify(result), 200
 
-@managers_bp.route('/doctor/<uuid:doctor_id>/schedule/<uuid:schedule_id>', methods=['PUT'])
+@managers_bp.route('/doctor/<uuid:doctor_id>/schedule', methods=['PUT'])
 @role_and_approval_required('manager')
-def update_schedule(doctor_id, schedule_id):
+def update_or_create_schedule(doctor_id):
     data = request.get_json()
     try:
-        schedule = DoctorSchedule.query.get(schedule_id)
-        if not schedule or schedule.doctor_id != doctor_id:
-            return jsonify({'message': 'Schedule not found'}), 404
+        # Парсим дату из строки
+        date = datetime.strptime(data['date'], '%Y-%m-%d').date()
 
-        schedule.date = datetime.strptime(data['date'], '%Y-%m-%d').date()
-        schedule.start_time = datetime.strptime(data['start_time'], '%H:%M').time()
-        schedule.end_time = datetime.strptime(data['end_time'], '%H:%M').time()
-        schedule.break_minutes = data['break_minutes']
-        schedule.hours_worked = data['hours_worked']
-        db.session.commit()
-        return jsonify({'message': 'Schedule updated successfully'}), 200
+        # Проверяем, существует ли уже запись на эту дату
+        existing_schedule = DoctorSchedule.query.filter_by(doctor_id=doctor_id, date=date).first()
+
+        if existing_schedule:
+            # Если запись существует, обновляем её
+            existing_schedule.start_time = datetime.strptime(data['start_time'], '%H:%M').time()
+            existing_schedule.end_time = datetime.strptime(data['end_time'], '%H:%M').time()
+            existing_schedule.break_minutes = data['break_minutes']
+            existing_schedule.hours_worked = data['hours_worked']
+            db.session.commit()
+            return jsonify({'message': 'Schedule updated successfully'}), 200
+        else:
+            # Если записи нет, создаем новую
+            new_schedule = DoctorSchedule(
+                doctor_id=doctor_id,
+                date=date,
+                start_time=datetime.strptime(data['start_time'], '%H:%M').time(),
+                end_time=datetime.strptime(data['end_time'], '%H:%M').time(),
+                break_minutes=data['break_minutes'],
+                hours_worked=data['hours_worked']
+            )
+            db.session.add(new_schedule)
+            db.session.commit()
+            return jsonify({'message': 'Schedule created successfully'}), 201
     except Exception as e:
         db.session.rollback()
         return jsonify({'message': str(e)}), 400
+
+
+@managers_bp.route('/doctor/<uuid:doctor_id>/schedule', methods=['POST'])
+@role_and_approval_required('manager')
+def create_schedule(doctor_id):
+    data = request.get_json()
+    try:
+        schedule_entries = data['schedule']
+        for entry in schedule_entries:
+            schedule = DoctorSchedule(
+                doctor_id=doctor_id,
+                date=datetime.strptime(entry['date'], '%Y-%m-%d').date(),
+                start_time=datetime.strptime(entry['start_time'], '%H:%M').time(),
+                end_time=datetime.strptime(entry['end_time'], '%H:%M').time(),
+                break_minutes=entry['break_minutes'],
+                hours_worked=entry['hours_worked']
+            )
+            db.session.add(schedule)
+        db.session.commit()
+        return jsonify({'message': 'Schedule created successfully'}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'message': str(e)}), 400
+
+
+@managers_bp.route('/doctor/<uuid:doctor_id>/schedule/<string:date>', methods=['DELETE'])
+@role_and_approval_required('manager')
+def delete_schedule(doctor_id, date):
+    try:
+        # Парсим дату из строки
+        schedule_date = datetime.strptime(date, '%Y-%m-%d').date()
+
+        # Находим запись в расписании доктора на указанную дату
+        schedule = DoctorSchedule.query.filter_by(doctor_id=doctor_id, date=schedule_date).first()
+
+        if not schedule:
+            return jsonify({'message': 'Schedule not found for the specified date'}), 404
+
+        # Удаляем запись из базы данных
+        db.session.delete(schedule)
+        db.session.commit()
+
+        return jsonify({'message': 'Schedule deleted successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error: {str(e)}")
+        return jsonify({'message': 'An error occurred', 'error': str(e)}), 500
 
 @managers_bp.route('/admin_only', methods=['GET'])
 @check_token_not_revoked

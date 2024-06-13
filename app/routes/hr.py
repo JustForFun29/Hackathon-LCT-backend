@@ -16,9 +16,10 @@ hr_bp = Blueprint('hr', __name__)
 # Настраиваем логирование
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s:%(message)s')
 
-def generate_random_password(length=8):
-    letters_and_digits = string.ascii_letters + string.digits
-    return ''.join(random.choice(letters_and_digits) for i in range(length))
+def generate_random_password(length=12):
+    characters = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
+    password = ''.join(random.choice(characters) for i in range(length))
+    return password
 
 def send_email(to, subject, template):
     msg = Message(
@@ -124,6 +125,7 @@ def hr_create_doctor():
         logging.error(f"Error: {str(e)}")
         return jsonify({'message': 'An error occurred', 'error': str(e)}), 500
 
+#TODO: Внедрить логику создания тикетов и чтобы только руководитель мог менять
 @hr_bp.route('/doctor/<uuid:doctor_id>/schedule', methods=['POST'])
 @role_and_approval_required('hr')
 def create_schedule(doctor_id):
@@ -146,6 +148,7 @@ def create_schedule(doctor_id):
         db.session.rollback()
         return jsonify({'message': str(e)}), 400
 
+#TODO: Внедрить логику создания тикетов и чтобы только руководитель мог менять
 @hr_bp.route('/doctor/<uuid:doctor_id>/schedule/<uuid:schedule_id>', methods=['DELETE'])
 @role_and_approval_required('hr')
 def delete_schedule(doctor_id, schedule_id):
