@@ -260,6 +260,15 @@ def update_doctor(doctor_id):
         if not doctor:
             return jsonify({'message': 'Doctor not found'}), 404
 
+        # Получаем пользователя по user_id
+        user = Users.query.get(doctor.user_id)
+        if not user:
+            return jsonify({'message': 'User not found'}), 404
+
+        # Обновляем данные пользователя
+        if 'full_name' in data:
+            user.full_name = data['full_name']
+
         # Обновляем данные доктора
         if 'experience' in data:
             doctor.experience = data['experience']
