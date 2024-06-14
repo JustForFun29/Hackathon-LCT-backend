@@ -7,6 +7,7 @@ from app.decorators import role_and_approval_required, check_token_not_revoked
 from datetime import datetime
 
 doctors_bp = Blueprint('doctor', __name__)
+
 @doctors_bp.route('/schedule', methods=['GET'])
 @jwt_required()
 def get_doctor_schedule():
@@ -27,7 +28,8 @@ def get_doctor_schedule():
             'start_time': schedule.start_time.strftime('%H:%M'),
             'end_time': schedule.end_time.strftime('%H:%M'),
             'break_minutes': schedule.break_minutes,
-            'hours_worked': schedule.hours_worked
+            'hours_worked': schedule.hours_worked,
+            'day_type': schedule.day_type.value  # Добавляем тип дня
         }
         result.append(schedule_data)
     return jsonify(result), 200
@@ -60,7 +62,8 @@ def get_schedule(doctor_id):
             'start_time': schedule.start_time.strftime('%H:%M'),
             'end_time': schedule.end_time.strftime('%H:%M'),
             'break_minutes': schedule.break_minutes,
-            'hours_worked': schedule.hours_worked
+            'hours_worked': schedule.hours_worked,
+            'day_type': schedule.day_type.value  # Добавляем тип дня
         }
         result.append(schedule_data)
         total_month_hours += schedule.hours_worked

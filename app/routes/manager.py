@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from flask_mail import Message
 from app import mail
 import logging
+import json
 
 # Установим уровень логирования на DEBUG
 logging.basicConfig(level=logging.DEBUG)
@@ -34,7 +35,7 @@ def generate_random_password(length=12):
 @managers_bp.route('/tickets', methods=['GET'])
 @role_and_approval_required('manager')
 def get_tickets():
-    tickets = Ticket.query.all()
+    tickets = Ticket.query.join(Users, Ticket.user_id == Users.id).all()
     result = []
     for ticket in tickets:
         ticket_data = {
@@ -42,7 +43,8 @@ def get_tickets():
             'type': ticket.type,
             'data': ticket.data,
             'status': ticket.status,
-            'created_at': ticket.created_at
+            'created_at': ticket.created_at,
+            'full_name': ticket.user.full_name  # Добавляем полное имя доктора
         }
         result.append(ticket_data)
     return jsonify(result), 200
@@ -76,8 +78,82 @@ def approve_ticket(ticket_id):
 
         return jsonify({'message': 'Doctor approved successfully'}), 200
 
-    # Добавьте здесь дополнительные проверки для других типов тикетов, если это необходимо
+
+    elif ticket.type == 'update_doctor':
+
+        doctor = Doctors.query.filter_by(user_id=ticket.user_id).first()
+
+        if not doctor:
+            return jsonify({'message': 'Doctor not found'}), 404
+
+        # Десериализуем данные из JSON строки
+
+        data = json.loads(ticket.data)
+
+        # Обновляем данные врача
+
+        if 'experience' in data:
+            doctor.experience = data['experience']
+
+        if 'main_modality_id' in data:
+            doctor.main_modality_id = data['main_modality_id']
+
+        if 'gender' in data:
+            doctor.gender = data['gender']
+
+        if 'rate' in data:
+            doctor.rate = data['rate']
+
+        if 'status' in data:
+            doctor.status = data['status']
+
+        if 'phone' in data:
+            doctor.phone = data['phone']
+
+        # Обновляем дополнительные модальности
+
+        if 'additional_modality' in data:
+
+            doctor.additional_modalities.clear()
+
+            for modality_name in data['additional_modality']:
+
+                modality = Modality.query.filter_by(name=modality_name).first()
+
+                if not modality:
+                    modality = Modality(name=modality_name)
+
+                    db.session.add(modality)
+
+                    db.session.commit()
+
+                doctor.additional_modalities.append(modality)
+
+        ticket.status = 'Approved'
+
+        db.session.commit()
+
+        # Отправляем уведомление по электронной почте
+
+        subject = "Изменение данных врача одобрено"
+
+        to = doctor.user.email
+
+        template = f"""
+
+                <p>Уважаемый {doctor.user.full_name},</p>
+
+                <p>Ваши данные были успешно обновлены.</p>
+
+                """
+
+        send_email(to, subject, template)
+
+        return jsonify({'message': 'Doctor update approved successfully'}), 200
+
+
     else:
+
         return jsonify({'message': 'Invalid ticket type'}), 400
 @managers_bp.route('/ticket/<uuid:ticket_id>', methods=['DELETE'])
 @role_and_approval_required('manager')
@@ -92,7 +168,7 @@ def delete_ticket(ticket_id):
 
 @managers_bp.route('/create_doctor', methods=['POST'])
 @role_and_approval_required('manager')
-def hr_create_doctor():
+def manager_create_doctor():
     data = request.get_json()
     try:
         password = generate_random_password()
@@ -173,6 +249,56 @@ def delete_doctor(doctor_id):
     db.session.commit()
 
     return jsonify({'message': 'Doctor deleted successfully'}), 200
+
+@managers_bp.route('/doctor/<uuid:doctor_id>', methods=['PUT'])
+@role_and_approval_required('manager')
+def update_doctor(doctor_id):
+    data = request.get_json()
+    try:
+        # Получаем доктора по doctor_id
+        doctor = Doctors.query.get(doctor_id)
+        if not doctor:
+            return jsonify({'message': 'Doctor not found'}), 404
+
+        # Обновляем данные доктора
+        if 'experience' in data:
+            doctor.experience = data['experience']
+        if 'gender' in data:
+            doctor.gender = data['gender']
+        if 'rate' in data:
+            doctor.rate = data['rate']
+        if 'status' in data:
+            doctor.status = data['status']
+        if 'phone' in data:
+            doctor.phone = data['phone']
+
+        # Обновляем основную модальность
+        if 'main_modality' in data:
+            main_modality = Modality.query.filter_by(name=data['main_modality']).first()
+            if not main_modality:
+                main_modality = Modality(name=data['main_modality'])
+                db.session.add(main_modality)
+                db.session.commit()
+            doctor.main_modality_id = main_modality.id
+
+        # Обновляем дополнительные модальности
+        if 'additional_modalities' in data:
+            doctor.additional_modalities.clear()
+            additional_modalities = data.get('additional_modalities', [])
+            for modality_name in additional_modalities:
+                modality = Modality.query.filter_by(name=modality_name).first()
+                if not modality:
+                    modality = Modality(name=modality_name)
+                    db.session.add(modality)
+                    db.session.commit()
+                doctor.additional_modalities.append(modality)
+
+        db.session.commit()
+        return jsonify({'message': 'Doctor updated successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'message': str(e)}), 400
+
 
 @managers_bp.route('/doctors', methods=['GET'])
 @role_and_approval_required('manager', 'hr')
