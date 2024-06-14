@@ -12,11 +12,16 @@ from flask_mail import Message
 from app import mail
 import logging
 import json
+from app.ml import Predictor
+import pandas as pd
+
 
 # Установим уровень логирования на DEBUG
 logging.basicConfig(level=logging.DEBUG)
 
 managers_bp = Blueprint('manager', __name__)
+predictor = Predictor()
+
 
 def send_email(to, subject, template):
     msg = Message(
@@ -48,6 +53,37 @@ def get_tickets():
         }
         result.append(ticket_data)
     return jsonify(result), 200
+
+
+@managers_bp.route('/predict', methods=['POST'])
+@role_and_approval_required('manager')
+def predict():
+    '''
+    {
+        'year': 2024,
+        'start_week': 1,
+        'end_week': 52,
+        'target': 'МРТ с КУ 2 и более зон',
+
+    }
+    '''
+
+    data = request.get_json()
+
+    target = data['target']
+    start_week = data['start_week']
+    end_week = data['end_week']
+    year = data['year']
+
+    data_for_ml = pd.DataFrame({
+        'Год': [2024 for _ in range(start_week, end_week + 1)],
+        'Номер недели': [i for i in range(start_week, end_week + 1)],
+    })
+
+    return jsonify(
+        {'predictions': predictor.predict(target, data_for_ml),
+         'year': year, 'start_week': start_week, 'end_week': end_week, 'target': target}
+    ), 200
 
 
 @managers_bp.route('/approve/<uuid:ticket_id>', methods=['PUT'])
