@@ -96,7 +96,7 @@ def hr_create_doctor():
             user_id=new_user.id,
             type='approve_doctor',
             data={},
-            status='Ожидает'
+            status='Pending'
         )
         db.session.add(new_ticket)
         db.session.commit()

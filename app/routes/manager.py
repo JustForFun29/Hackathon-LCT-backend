@@ -35,7 +35,7 @@ def generate_random_password(length=12):
 @managers_bp.route('/tickets', methods=['GET'])
 @role_and_approval_required('manager')
 def get_tickets():
-    tickets = Ticket.query.join(Users, Ticket.user_id == Users.id).all()
+    tickets = Ticket.query.all()
     result = []
     for ticket in tickets:
         ticket_data = {
@@ -44,10 +44,11 @@ def get_tickets():
             'data': ticket.data,
             'status': ticket.status,
             'created_at': ticket.created_at,
-            'full_name': ticket.user.full_name  # Добавляем полное имя доктора
+            'full_name': ticket.user.full_name if ticket.user else None
         }
         result.append(ticket_data)
     return jsonify(result), 200
+
 
 
 @managers_bp.route('/approve/<uuid:ticket_id>', methods=['PUT'])
@@ -63,7 +64,7 @@ def approve_ticket(ticket_id):
             return jsonify({'message': 'User not found'}), 404
 
         user.approved = True
-        ticket.status = 'Выполнено'
+        ticket.status = 'Approved'
         db.session.commit()
 
         # Отправка email с уведомлением о подтверждении
