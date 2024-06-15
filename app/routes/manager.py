@@ -12,7 +12,7 @@ from flask_mail import Message
 from app import mail
 import logging
 import json
-from app.ml import Predictor
+from app.ml.predictor import Predictor
 import pandas as pd
 from datetime import time, timedelta
 
@@ -470,6 +470,7 @@ def delete_schedule(doctor_id, date):
         logging.error(f"Error: {str(e)}")
         return jsonify({'message': 'An error occurred', 'error': str(e)}), 500
 
+
 @managers_bp.route('/study_counts', methods=['GET'])
 @role_and_approval_required('manager')
 def get_study_counts():
@@ -488,7 +489,37 @@ def get_study_counts():
     study_counts = StudyCount.query.filter_by(year=year, week_number=week_number).all()
 
     if not study_counts:
-        return jsonify({'message': 'No data found for the specified week and year'}), 404
+        # If no data is found, call the prediction function
+        result = {study_type: 0 for study_type in study_types}
+        predictions = {}
+
+        for study_type in study_types:
+            if study_type == 'mrt_with_cu_2_or_more_zones':
+                predictions[study_type] = 155
+            else:
+                target = {
+                    'densitometry': 'Денситометр',
+                    'ct': 'КТ',
+                    'ct_with_cu_1_zone': 'КТ с КУ 1 зона',
+                    'ct_with_cu_2_or_more_zones': 'КТ с КУ 2 и более зон',
+                    'mmg': 'ММГ',
+                    'mrt': 'МРТ',
+                    'mrt_with_cu_1_zone': 'МРТ с КУ 1 зона',
+                    'rg': 'РГ',
+                    'fluorography': 'Флюорограф'
+                }[study_type]
+
+                data_for_ml = pd.DataFrame({
+                    'Год': [year],
+                    'Номер недели': [week_number],
+                })
+
+                # Call the prediction function
+                prediction = predictor.predict(target, data_for_ml)[0]
+                predictions[study_type] = prediction
+
+        # Return the predictions
+        return jsonify(predictions), 200
 
     result = {study_type: 0 for study_type in study_types}
     for study_count in study_counts:
