@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager
 from flask_cors import CORS
@@ -12,9 +12,15 @@ mail = Mail()
 
 revoked_tokens = set()
 
+class CustomJSONEncoder(json.JSONEncoder):
+    def __init__(self, *args, **kwargs):
+        kwargs['ensure_ascii'] = False
+        super().__init__(*args, **kwargs)
+
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+    app.json_encoder = CustomJSONEncoder
 
     db.init_app(app)
     jwt.init_app(app)
