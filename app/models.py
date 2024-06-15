@@ -44,7 +44,6 @@ class Modality(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(255), unique=True, nullable=False)
 
-
 class DoctorAdditionalModalities(db.Model):
     __tablename__ = 'doctor_additional_modalities'
     doctor_id = db.Column(UUID(as_uuid=True), db.ForeignKey('doctors.id'), primary_key=True)
@@ -63,8 +62,8 @@ class DoctorSchedule(db.Model):
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     doctor_id = db.Column(UUID(as_uuid=True), db.ForeignKey('doctors.id'), nullable=False)
     date = db.Column(db.Date, nullable=False)
-    start_time = db.Column(db.Time, nullable=False)
-    end_time = db.Column(db.Time, nullable=False)
+    start_time = db.Column(db.Time, nullable=True)
+    end_time = db.Column(db.Time, nullable=True)
     break_minutes = db.Column(db.Integer, nullable=False)
     hours_worked = db.Column(db.Float, nullable=False)
     day_type = db.Column(Enum(DayType), nullable=False, default=DayType.WORKING_DAY)  # Добавляем поле для типа дня
@@ -91,3 +90,12 @@ class Ticket(db.Model):
     @data_dict.setter
     def data_dict(self, value):
         self.data = json.dumps(value, ensure_ascii=False)
+
+class StudyCount(db.Model):
+    __tablename__ = 'study_count'
+
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    year = db.Column(db.Integer, nullable=False)
+    week_number = db.Column(db.Integer, nullable=False)
+    study_type = db.Column(db.String(255), nullable=False)
+    study_count = db.Column(db.Float, nullable=False)

@@ -3,7 +3,7 @@ import string
 import random
 from flask import Blueprint, jsonify, request, current_app
 from app import db
-from app.models import Users, Doctors, Modality, DoctorAdditionalModalities, DoctorSchedule, Ticket
+from app.models import Users, Doctors, Modality, DoctorAdditionalModalities, DoctorSchedule, Ticket, DayType, StudyCount
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.decorators import role_and_approval_required, check_token_not_revoked
 from datetime import datetime, timedelta
@@ -12,20 +12,27 @@ from flask_mail import Message
 from app import mail
 import logging
 import json
+from datetime import time, timedelta
+
 
 # Установим уровень логирования на DEBUG
 logging.basicConfig(level=logging.DEBUG)
 
 managers_bp = Blueprint('manager', __name__)
 
+#TODO: Поменять это на рабочий email
+
+# def send_email(to, subject, template):
+#     msg = Message(
+#         subject,
+#         recipients=[to],
+#         html=template,
+#         sender=current_app.config['MAIL_DEFAULT_SENDER']
+#     )
+#     mail.send(msg)
+
 def send_email(to, subject, template):
-    msg = Message(
-        subject,
-        recipients=[to],
-        html=template,
-        sender=current_app.config['MAIL_DEFAULT_SENDER']
-    )
-    mail.send(msg)
+    print(f'{to} {subject} {template}')
 
 def generate_random_password(length=12):
     characters = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
@@ -48,6 +55,7 @@ def get_tickets():
         }
         result.append(ticket_data)
     return jsonify(result), 200
+
 
 
 
@@ -79,7 +87,6 @@ def approve_ticket(ticket_id):
 
         return jsonify({'message': 'Doctor approved successfully'}), 200
 
-
     elif ticket.type == 'update_doctor':
 
         doctor = Doctors.query.filter_by(user_id=ticket.user_id).first()
@@ -88,73 +95,83 @@ def approve_ticket(ticket_id):
             return jsonify({'message': 'Doctor not found'}), 404
 
         # Десериализуем данные из JSON строки
-
-        data = json.loads(ticket.data)
+        data = json.loads(ticket.data) if isinstance(ticket.data, str) else ticket.data
 
         # Обновляем данные врача
-
         if 'experience' in data:
             doctor.experience = data['experience']
-
         if 'main_modality_id' in data:
             doctor.main_modality_id = data['main_modality_id']
-
         if 'gender' in data:
             doctor.gender = data['gender']
-
         if 'rate' in data:
             doctor.rate = data['rate']
-
         if 'status' in data:
             doctor.status = data['status']
-
         if 'phone' in data:
             doctor.phone = data['phone']
 
         # Обновляем дополнительные модальности
-
         if 'additional_modality' in data:
-
             doctor.additional_modalities.clear()
-
             for modality_name in data['additional_modality']:
-
                 modality = Modality.query.filter_by(name=modality_name).first()
-
                 if not modality:
                     modality = Modality(name=modality_name)
-
                     db.session.add(modality)
-
                     db.session.commit()
-
                 doctor.additional_modalities.append(modality)
 
         ticket.status = 'Approved'
-
         db.session.commit()
 
         # Отправляем уведомление по электронной почте
-
         subject = "Изменение данных врача одобрено"
-
         to = doctor.user.email
-
         template = f"""
-
                 <p>Уважаемый {doctor.user.full_name},</p>
-
                 <p>Ваши данные были успешно обновлены.</p>
-
                 """
-
         send_email(to, subject, template)
 
         return jsonify({'message': 'Doctor update approved successfully'}), 200
 
+    elif ticket.type == 'emergency_request':
+        try:
+            data = json.loads(ticket.data) if isinstance(ticket.data, str) else ticket.data
+            start_date = datetime.strptime(data['start_date'], '%Y-%m-%d').date()
+            end_date = datetime.strptime(data['end_date'], '%Y-%m-%d').date()
+            doctor_id = Doctors.query.filter_by(user_id=ticket.user_id).first().id
+
+            current_date = start_date
+            while current_date <= end_date:
+                # Проверяем, есть ли уже запись с типом "WORKING_DAY" на эту дату
+                existing_schedule = DoctorSchedule.query.filter_by(doctor_id=doctor_id, date=current_date, day_type=DayType.WORKING_DAY).first()
+                if existing_schedule:
+                    db.session.delete(existing_schedule)
+
+                # Создаем новую запись с типом "EMERGENCY"
+                new_schedule = DoctorSchedule(
+                    doctor_id=doctor_id,
+                    date=current_date,
+                    start_time=time(0, 0),
+                    end_time=time(23, 59),
+                    break_minutes=0,
+                    hours_worked=0.0,
+                    day_type=DayType.EMERGENCY
+                )
+                db.session.add(new_schedule)
+                current_date += timedelta(days=1)
+
+            ticket.status = 'Approved'
+            db.session.commit()
+
+            return jsonify({'message': 'Ticket approved successfully'}), 200
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'message': str(e)}), 400
 
     else:
-
         return jsonify({'message': 'Invalid ticket type'}), 400
 @managers_bp.route('/ticket/<uuid:ticket_id>', methods=['DELETE'])
 @role_and_approval_required('manager')
@@ -350,6 +367,7 @@ def update_or_create_schedule(doctor_id):
             existing_schedule.end_time = datetime.strptime(data['end_time'], '%H:%M').time()
             existing_schedule.break_minutes = data['break_minutes']
             existing_schedule.hours_worked = data['hours_worked']
+            existing_schedule.day_type = data['day_type']
             db.session.commit()
             return jsonify({'message': 'Schedule updated successfully'}), 200
         else:
@@ -416,8 +434,28 @@ def delete_schedule(doctor_id, date):
         logging.error(f"Error: {str(e)}")
         return jsonify({'message': 'An error occurred', 'error': str(e)}), 500
 
-@managers_bp.route('/admin_only', methods=['GET'])
-@check_token_not_revoked
+@managers_bp.route('/study_counts', methods=['GET'])
 @role_and_approval_required('manager')
-def admin_only():
-    return jsonify({'message': 'Welcome, approved manager!'}), 200
+def get_study_counts():
+    year = request.args.get('year', type=int)
+    week_number = request.args.get('week_number', type=int)
+
+    if not year or not week_number:
+        return jsonify({'message': 'Year and week number are required'}), 400
+
+    study_types = [
+        'densitometry', 'ct', 'ct_with_cu_1_zone', 'ct_with_cu_2_or_more_zones',
+        'mmg', 'mrt', 'mrt_with_cu_1_zone', 'mrt_with_cu_2_or_more_zones',
+        'rg', 'fluorography'
+    ]
+
+    study_counts = StudyCount.query.filter_by(year=year, week_number=week_number).all()
+
+    if not study_counts:
+        return jsonify({'message': 'No data found for the specified week and year'}), 404
+
+    result = {study_type: 0 for study_type in study_types}
+    for study_count in study_counts:
+        result[study_count.study_type] = study_count.study_count
+
+    return jsonify(result), 200

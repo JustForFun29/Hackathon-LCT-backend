@@ -21,14 +21,18 @@ def generate_random_password(length=12):
     password = ''.join(random.choice(characters) for i in range(length))
     return password
 
+#TODO: Поменять это на рабочий email
+
+# def send_email(to, subject, template):
+#     msg = Message(
+#         subject,
+#         recipients=[to],
+#         html=template,
+#         sender="hello@such.ae"
+#     )
+#     mail.send(msg)
 def send_email(to, subject, template):
-    msg = Message(
-        subject,
-        recipients=[to],
-        html=template,
-        sender="hello@such.ae"
-    )
-    mail.send(msg)
+    print(f'{to} {subject} {template}')
 
 
 @hr_bp.route('/email', methods=['POST'])
