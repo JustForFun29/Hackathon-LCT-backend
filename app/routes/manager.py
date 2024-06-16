@@ -15,7 +15,6 @@ import json
 from app.ml.predictor import Predictor
 import pandas as pd
 from datetime import time, timedelta
-from app.nn.voice_controller import VoiceController
 
 from flask import request, jsonify, make_response
 import pandas as pd
@@ -63,32 +62,6 @@ def get_tickets():
         }
         result.append(ticket_data)
     return jsonify(result), 200
-
-
-@managers_bp.route('/voice_control', methods=['GET'])
-@role_and_approval_required('manager')
-def voice_control():
-    try:
-        vc = VoiceController()
-        out = {
-            'function': vc.execute()
-        }
-        return jsonify(out), 200
-    except Exception as e:
-        return jsonify({'message': str(e)}), 400
-
-
-@managers_bp.route('/voice_control_wav', methods=['GET'])
-@role_and_approval_required('manager')
-def voice_control_wav():
-    try:
-        vc = VoiceController()
-        out = {
-            'function': vc.execute(input_type='wav', path='app/nn/voice.wav')
-        }
-        return jsonify(out), 200
-    except Exception as e:
-        return jsonify({'message': str(e)}), 400
 
 
 @managers_bp.route('/predict', methods=['POST'])
