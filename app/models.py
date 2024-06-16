@@ -5,6 +5,8 @@ from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.dialects.postgresql import JSONB
 import json
+import enum
+from sqlalchemy import Enum
 
 
 class Users(db.Model):
@@ -19,7 +21,7 @@ class Users(db.Model):
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
-    def check_password(self, password):
+    def check_password(self, password: str) -> bool:
         return check_password_hash(self.password_hash, password)
 
     # Relationship with Doctors
@@ -37,7 +39,9 @@ class Doctors(db.Model):
     rate = db.Column(db.Float, nullable=False)
     status = db.Column(db.String(255), default='Ожидает подтверждения', nullable=False)
     phone = db.Column(db.String(255), nullable=False)
-    additional_modalities = db.relationship('Modality', secondary='doctor_additional_modalities', backref=db.backref('doctors', lazy='dynamic'))
+    additional_modalities = db.relationship(
+        'Modality', secondary='doctor_additional_modalities', backref=db.backref('doctors', lazy='dynamic')
+    )
 
 
 class Modality(db.Model):
@@ -51,13 +55,11 @@ class DoctorAdditionalModalities(db.Model):
     modality_id = db.Column(db.Integer, db.ForeignKey('modality.id'), primary_key=True)
 
 
-import enum
-from sqlalchemy import Enum
-
 class DayType(enum.Enum):
     WORKING_DAY = "Рабочий день"
     EMERGENCY = "Чрезвычайная ситуация"
     VACATION = "Отпуск"
+
 
 class DoctorSchedule(db.Model):
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -68,7 +70,7 @@ class DoctorSchedule(db.Model):
     break_minutes = db.Column(db.Integer, nullable=False)
     hours_worked = db.Column(db.Float, nullable=False)
     day_type = db.Column(Enum(DayType), nullable=False, default=DayType.WORKING_DAY)  # Добавляем поле для типа дня
-
+    schedule = db.Column(JSONB, nullable=False)
     doctor = db.relationship('Doctors', backref=db.backref('schedules', lazy=True))
 
 
@@ -85,9 +87,9 @@ class Ticket(db.Model):
     user = db.relationship('Users', backref=db.backref('associated_tickets', lazy=True))
 
     @property
-    def data_dict(self):
+    def data_dict(self) -> dict:
         return json.loads(self.data)
 
     @data_dict.setter
-    def data_dict(self, value):
+    def data_dict(self, value: dict):
         self.data = json.dumps(value, ensure_ascii=False)

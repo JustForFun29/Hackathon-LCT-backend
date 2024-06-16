@@ -16,8 +16,9 @@ def register():
             full_name=data['full_name'],
             email=data['email'],
             role=data['role'],
-            approved=False
+            approved=True
         )
+
         new_user.set_password(data['password'])
         db.session.add(new_user)
         db.session.commit()

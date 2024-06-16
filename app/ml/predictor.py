@@ -8,7 +8,7 @@ import os
 class Predictor:
     def __init__(self):
         self.models = {}
-        dir_ = 'saved_models'
+        dir_ = 'app/ml/saved_models'
 
         for folder in os.listdir(dir_):
             for file in os.listdir(f'{dir_}/{folder}'):

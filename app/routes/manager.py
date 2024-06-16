@@ -12,7 +12,8 @@ from flask_mail import Message
 from app import mail
 import logging
 import json
-from app.ml import Predictor
+from app.nn.voice_controller import VoiceController
+from app.ml.predictor import Predictor
 import pandas as pd
 
 
@@ -21,6 +22,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 managers_bp = Blueprint('manager', __name__)
 predictor = Predictor()
+vc = VoiceController()
 
 
 def send_email(to, subject, template):
@@ -32,10 +34,12 @@ def send_email(to, subject, template):
     )
     mail.send(msg)
 
-def generate_random_password(length=12):
+
+def generate_random_password(length: int = 12) -> str:
     characters = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
     password = ''.join(random.choice(characters) for i in range(length))
     return password
+
 
 @managers_bp.route('/tickets', methods=['GET'])
 @role_and_approval_required('manager')
@@ -58,15 +62,6 @@ def get_tickets():
 @managers_bp.route('/predict', methods=['POST'])
 @role_and_approval_required('manager')
 def predict():
-    '''
-    {
-        'year': 2024,
-        'start_week': 1,
-        'end_week': 52,
-        'target': 'МРТ с КУ 2 и более зон',
-
-    }
-    '''
 
     data = request.get_json()
 
@@ -76,7 +71,7 @@ def predict():
     year = data['year']
 
     data_for_ml = pd.DataFrame({
-        'Год': [2024 for _ in range(start_week, end_week + 1)],
+        'Год': [year for _ in range(start_week, end_week + 1)],
         'Номер недели': [i for i in range(start_week, end_week + 1)],
     })
 
@@ -113,7 +108,6 @@ def approve_ticket(ticket_id):
         send_email(to, subject, template)
 
         return jsonify({'message': 'Doctor approved successfully'}), 200
-
 
     elif ticket.type == 'update_doctor':
 
@@ -187,10 +181,10 @@ def approve_ticket(ticket_id):
 
         return jsonify({'message': 'Doctor update approved successfully'}), 200
 
-
     else:
-
         return jsonify({'message': 'Invalid ticket type'}), 400
+
+
 @managers_bp.route('/ticket/<uuid:ticket_id>', methods=['DELETE'])
 @role_and_approval_required('manager')
 def delete_ticket(ticket_id):
@@ -201,6 +195,7 @@ def delete_ticket(ticket_id):
     db.session.delete(ticket)
     db.session.commit()
     return jsonify({'message': 'Ticket deleted successfully'}), 200
+
 
 @managers_bp.route('/create_doctor', methods=['POST'])
 @role_and_approval_required('manager')
@@ -257,7 +252,6 @@ def manager_create_doctor():
                <p>Вы можете войти на наш сервис используя эти данные</p>
                """
         send_email(to, subject, template)
-
         return jsonify({'message': 'Doctor created successfully and approval ticket generated'}), 201
     except IntegrityError as e:
         db.session.rollback()
@@ -269,6 +263,7 @@ def manager_create_doctor():
         db.session.rollback()
         logging.error(f"Error: {str(e)}")
         return jsonify({'message': 'An error occurred', 'error': str(e)}), 500
+
 
 @managers_bp.route('/doctor/<uuid:doctor_id>', methods=['DELETE'])
 @role_and_approval_required('manager')
@@ -285,6 +280,13 @@ def delete_doctor(doctor_id):
     db.session.commit()
 
     return jsonify({'message': 'Doctor deleted successfully'}), 200
+
+
+@managers_bp.route('/voice_control', methods=['GET'])
+@role_and_approval_required('manager')
+def voice_control():
+    return jsonify({'Command': vc.execute()})
+
 
 @managers_bp.route('/doctor/<uuid:doctor_id>', methods=['PUT'])
 @role_and_approval_required('manager')
@@ -366,7 +368,9 @@ def get_all_doctors():
             'gender': doctor.gender
         }
         result.append(doctor_data)
+
     return jsonify(result), 200
+
 
 @managers_bp.route('/doctor/<uuid:doctor_id>/schedule', methods=['PUT'])
 @role_and_approval_required('manager')
@@ -409,16 +413,19 @@ def update_or_create_schedule(doctor_id):
 @role_and_approval_required('manager')
 def create_schedule(doctor_id):
     data = request.get_json()
+    print(data)
     try:
         schedule_entries = data['schedule']
         for entry in schedule_entries:
+            print(entry)
             schedule = DoctorSchedule(
                 doctor_id=doctor_id,
                 date=datetime.strptime(entry['date'], '%Y-%m-%d').date(),
                 start_time=datetime.strptime(entry['start_time'], '%H:%M').time(),
                 end_time=datetime.strptime(entry['end_time'], '%H:%M').time(),
                 break_minutes=entry['break_minutes'],
-                hours_worked=entry['hours_worked']
+                hours_worked=entry['hours_worked'],
+                schedule=entry['schedule']
             )
             db.session.add(schedule)
         db.session.commit()
@@ -450,6 +457,7 @@ def delete_schedule(doctor_id, date):
         db.session.rollback()
         logging.error(f"Error: {str(e)}")
         return jsonify({'message': 'An error occurred', 'error': str(e)}), 500
+
 
 @managers_bp.route('/admin_only', methods=['GET'])
 @check_token_not_revoked
