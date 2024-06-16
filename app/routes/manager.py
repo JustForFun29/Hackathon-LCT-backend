@@ -16,8 +16,6 @@ from app.ml.predictor import Predictor
 import pandas as pd
 from datetime import time, timedelta
 
-
-
 # Установим уровень логирования на DEBUG
 logging.basicConfig(level=logging.DEBUG)
 
@@ -94,6 +92,33 @@ def predict():
     ), 200
 
 
+@managers_bp.route('/decline/<uuid:ticket_id>', methods=['PUT'])
+@role_and_approval_required('manager')
+def decline_ticket(ticket_id):
+    ticket = Ticket.query.get(ticket_id)
+    if not ticket:
+        return jsonify({'message': 'Ticket not found'}), 404
+
+    if ticket.status != 'Pending':
+        return jsonify({'message': 'Only tickets with status "Pending" can be declined'}), 400
+
+    try:
+        ticket.status = 'Declined'
+        db.session.commit()
+
+        user = Users.query.get(ticket.user_id)
+        subject = "Ваш запрос был отклонён"
+        to = user.email
+        template = f"""
+        <p>Уважаемый {user.full_name},</p>
+        <p>Ваш запрос с типом {ticket.type} был отклонён руководителем.</p>
+        """
+        send_email(to, subject, template)
+
+        return jsonify({'message': 'Ticket declined successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'message': str(e)}), 400
 
 @managers_bp.route('/approve/<uuid:ticket_id>', methods=['PUT'])
 @role_and_approval_required('manager')
@@ -437,7 +462,8 @@ def create_schedule(doctor_id):
                 start_time=datetime.strptime(entry['start_time'], '%H:%M').time(),
                 end_time=datetime.strptime(entry['end_time'], '%H:%M').time(),
                 break_minutes=entry['break_minutes'],
-                hours_worked=entry['hours_worked']
+                hours_worked=entry['hours_worked'],
+                day_type=entry['day_type']
             )
             db.session.add(schedule)
         db.session.commit()

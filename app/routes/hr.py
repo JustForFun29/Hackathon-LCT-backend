@@ -51,6 +51,7 @@ def email_test():
     except Exception as e:
         db.session.rollback()
         return jsonify({'message': str(e)}), 400
+
 @hr_bp.route('/create_doctor', methods=['POST'])
 @role_and_approval_required('hr')
 def hr_create_doctor():
@@ -129,6 +130,31 @@ def hr_create_doctor():
         logging.error(f"Error: {str(e)}")
         return jsonify({'message': 'An error occurred', 'error': str(e)}), 500
 
+@hr_bp.route('/doctor/<uuid:doctor_id>/delete', methods=['DELETE'])
+@role_and_approval_required('hr')
+def delete_doctor(doctor_id):
+    try:
+        doctor = Doctors.query.get(doctor_id)
+        if not doctor:
+            return jsonify({'message': 'Doctor not found'}), 404
+
+        db.session.delete(doctor)
+        db.session.commit()
+
+        # Создаем тикет для удаления врача
+        new_ticket = Ticket(
+            user_id=doctor.user_id,
+            type='delete_doctor',
+            data={},
+            status='Pending'
+        )
+        db.session.add(new_ticket)
+        db.session.commit()
+
+        return jsonify({'message': 'Doctor deleted successfully and deletion ticket generated'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'message': str(e)}), 400
 
 @hr_bp.route('/doctor/<uuid:doctor_id>/update', methods=['PUT'])
 @role_and_approval_required('hr')

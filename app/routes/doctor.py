@@ -20,7 +20,20 @@ def get_doctor_schedule():
     if not doctor:
         return jsonify({'message': 'Doctor not found'}), 404
 
-    schedules = DoctorSchedule.query.filter_by(doctor_id=doctor.id).all()
+    # Получаем параметры запроса для года и месяца
+    year = request.args.get('year', type=int)
+    month = request.args.get('month', type=int)
+
+    if not year or not month:
+        return jsonify({'message': 'Year and month are required'}), 400
+
+    # Фильтруем расписание по году и месяцу
+    schedules = DoctorSchedule.query.filter(
+        DoctorSchedule.doctor_id == doctor.id,
+        db.extract('year', DoctorSchedule.date) == year,
+        db.extract('month', DoctorSchedule.date) == month
+    ).all()
+
     result = []
     for schedule in schedules:
         schedule_data = {
@@ -33,6 +46,7 @@ def get_doctor_schedule():
         }
         result.append(schedule_data)
     return jsonify(result), 200
+
 
 @doctors_bp.route('/<uuid:doctor_id>/schedule', methods=['GET'])
 @role_and_approval_required('hr', 'manager')

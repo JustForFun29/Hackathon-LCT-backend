@@ -55,7 +55,7 @@ from sqlalchemy import Enum
 
 class DayType(enum.Enum):
     WORKING_DAY = "Рабочий день"
-    EMERGENCY = "Чрезвычайная ситуация"
+    EMERGENCY = "Непредвиденная ситуация"
     VACATION = "Отпуск"
 
 class DoctorSchedule(db.Model):
