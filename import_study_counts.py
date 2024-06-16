@@ -13,7 +13,7 @@ df = pd.read_excel(file_path)
 df = df.rename(columns={
     'Год': 'year',
     'Номер недели': 'week_number',
-    'Денситометр': 'densitometry',
+    'Денситометрия': 'densitometry',
     'КТ': 'ct',
     'КТ с КУ 1 зона': 'ct_with_cu_1_zone',
     'КТ с КУ 2 и более зон': 'ct_with_cu_2_or_more_zones',
@@ -22,7 +22,7 @@ df = df.rename(columns={
     'МРТ с КУ 1 зона': 'mrt_with_cu_1_zone',
     'МРТ с КУ 2 и более зон': 'mrt_with_cu_2_or_more_zones',
     'РГ': 'rg',
-    'Флюорограф': 'fluorography'
+    'ФЛГ': 'fluorography'
 })
 
 study_types = [

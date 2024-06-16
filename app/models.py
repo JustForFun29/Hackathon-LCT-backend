@@ -44,6 +44,7 @@ class Modality(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(255), unique=True, nullable=False)
 
+
 class DoctorAdditionalModalities(db.Model):
     __tablename__ = 'doctor_additional_modalities'
     doctor_id = db.Column(UUID(as_uuid=True), db.ForeignKey('doctors.id'), primary_key=True)
