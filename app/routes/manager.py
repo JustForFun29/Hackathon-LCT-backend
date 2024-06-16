@@ -26,20 +26,17 @@ logging.basicConfig(level=logging.DEBUG)
 managers_bp = Blueprint('manager', __name__)
 predictor = Predictor()
 
-
-#TODO: Поменять это на рабочий email
+def send_email(to, subject, template):
+    msg = Message(
+        subject,
+        recipients=[to],
+        html=template,
+        sender=current_app.config['MAIL_DEFAULT_SENDER']
+    )
+    mail.send(msg)
 
 # def send_email(to, subject, template):
-#     msg = Message(
-#         subject,
-#         recipients=[to],
-#         html=template,
-#         sender=current_app.config['MAIL_DEFAULT_SENDER']
-#     )
-#     mail.send(msg)
-
-def send_email(to, subject, template):
-    print(f'{to} {subject} {template}')
+#     print(f'{to} {subject} {template}')
 
 def generate_random_password(length=12):
     characters = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
@@ -705,11 +702,10 @@ def get_doctors_info():
             'rate': doctor.rate,
             'status': doctor.status,
             'phone': doctor.phone,
-            'hours_per_week': 40  # Предположим, что каждый доктор работает 40 часов в неделю
+            'hours_per_week': 40
         }
         result.append(doctor_info)
     return result
-
 
 @managers_bp.route('/analyze_doctors', methods=['POST'])
 @role_and_approval_required('manager')
@@ -739,7 +735,41 @@ def analyze_doctors():
     logging.debug(f"Study Counts: {study_counts}")
 
     if not study_counts:
-        return jsonify({'message': 'No study counts found for the given week'}), 404
+        study_types = [
+            'Денситометрия', 'КТ', 'КТ с КУ 1 зона', 'КТ с КУ 2 и более зон',
+            'ММГ', 'МРТ', 'МРТ с КУ 1 зона', 'МРТ с КУ 2 и более зон',
+            'РГ', 'ФЛГ'
+        ]
+
+        # Вызов ML модели для прогнозирования
+        predictions = {}
+        for study_type in study_types:
+            if study_type == 'МРТ с КУ 2 и более зон':
+                predictions[study_type] = 155  # Примерное значение для демонстрации
+            else:
+                target = {
+                    'Денситометрия': 'Денситометр',
+                    'КТ': 'КТ',
+                    'КТ с КУ 1 зона': 'КТ с КУ 1 зона',
+                    'КТ с КУ 2 и более зон': 'КТ с КУ 2 и более зон',
+                    'ММГ': 'ММГ',
+                    'МРТ': 'МРТ',
+                    'МРТ с КУ 1 зона': 'МРТ с КУ 1 зона',
+                    'РГ': 'РГ',
+                    'ФЛГ': 'Флюорограф'
+                }[study_type]
+
+                data_for_ml = pd.DataFrame({
+                    'Год': [year for _ in range(start_week, start_week + 1)],  # Прогноз только на текущую неделю
+                    'Номер недели': [start_week for _ in range(start_week, start_week + 1)],
+                })
+
+                # Вызов функции предсказания
+                prediction = predictor.predict(target, data_for_ml)
+                predictions[study_type] = sum(prediction)  # Суммирование прогноза по неделе
+
+        # Используем прогнозы для дальнейших вычислений
+        study_counts = predictions
 
     # Получаем данные о докторах
     doctors_info = get_doctors_info()
@@ -749,8 +779,8 @@ def analyze_doctors():
     response = []
 
     for study in study_counts:
-        modality = study.study_type
-        study_count = study.study_count
+        modality = study.study_type if isinstance(study, StudyCount) else study
+        study_count = study.study_count if isinstance(study, StudyCount) else study_counts[study]
         required_minutes = study_count * mapper[modality]
         available_doctors = [doc for doc in doctors_info if doc['main_modality'] == modality or modality in doc['additional_modalities']]
         total_available_minutes = sum([doc['hours_per_week'] * 60 for doc in available_doctors])
@@ -774,119 +804,3 @@ def analyze_doctors():
     logging.debug(f"Response: {response}")
 
     return jsonify(response), 200
-
-
-# @managers_bp.route('/analyze_doctors', methods=['POST'])
-# @role_and_approval_required('manager')
-# def analyze_doctors():
-#     data = request.get_json()
-#     start_date_str = data.get('start_date')
-#
-#     logging.debug(f"Received start_date: {start_date_str}")
-#
-#     if not start_date_str:
-#         return jsonify({'message': 'Start date is required'}), 400
-#
-#     try:
-#         start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
-#         logging.debug(f"Parsed start_date: {start_date}")
-#     except ValueError:
-#         return jsonify({'message': 'Invalid date format, should be YYYY-MM-DD'}), 400
-#
-#     end_date = start_date + timedelta(days=6)
-#     year = start_date.year
-#     start_week = start_date.isocalendar()[1]
-#     end_week = end_date.isocalendar()[1]
-#
-#     logging.debug(f"Year: {year}, Start Week: {start_week}, End Week: {end_week}")
-#
-#     study_types_human_readable = {
-#         'densitometry': 'Денситометрия',
-#         'ct': 'КТ',
-#         'ct_with_cu_1_zone': 'КТ с КУ 1 зона',
-#         'ct_with_cu_2_or_more_zones': 'КТ с КУ 2 и более зон',
-#         'mmg': 'ММГ',
-#         'mrt': 'МРТ',
-#         'mrt_with_cu_1_zone': 'МРТ с КУ 1 зона',
-#         'mrt_with_cu_2_or_more_zones': 'МРТ с КУ 2 и более зон',
-#         'rg': 'РГ',
-#         'fluorography': 'Флюорография'
-#     }
-#
-#     study_counts = StudyCount.query.filter_by(year=year, week_number=start_week).all()
-#
-#     logging.debug(f"Study Counts: {study_counts}")
-#
-#     if not study_counts:
-#         return jsonify({'message': 'No study counts found for the given week'}), 404
-#
-#     # Получаем данные о докторах
-#     doctors_info = get_doctors_info()
-#     logging.debug(f"Doctors Info: {doctors_info}")
-#
-#     doctors_by_modality = {}
-#     for doctor in doctors_info:
-#         modalities = [doctor['main_modality'].lower()] + [mod.lower() for mod in doctor['additional_modalities']]
-#         for modality in modalities:
-#             if modality not in doctors_by_modality:
-#                 doctors_by_modality[modality] = []
-#             doctors_by_modality[modality].append(doctor)
-#
-#     logging.debug(f"Doctors by Modality: {doctors_by_modality}")
-#
-#     # Анализируем данные
-#     mods = [(study.study_type.lower(), study.study_count) for study in study_counts]
-#     docs_used = {}
-#     non_ok = []
-#
-#     for mod in mods:
-#         modality = study_types_human_readable.get(mod[0], mod[0])
-#         if modality not in mapper:
-#             continue
-#         minutes_left = mod[1] * mapper[modality]
-#         c = 0
-#         for doc in doctors_by_modality.get(modality.lower(), []):
-#             c += 1
-#             minutes_left -= doc['hours_per_week'] * 60
-#             if minutes_left <= 0:
-#                 break
-#         docs_used[modality] = c
-#
-#         if minutes_left > 0:
-#             non_ok.append((modality, minutes_left))
-#
-#     logging.debug(f"Docs Used: {docs_used}")
-#     logging.debug(f"Non-OK: {non_ok}")
-#
-#     response = []
-#     modality_ids = {v: k for k, v in enumerate(study_types_human_readable.values(), 1)}
-#
-#     for mod, count in docs_used.items():
-#         modality_id = modality_ids.get(mod, None)
-#         is_enough = count >= mapper[mod] / 60
-#         response.append({
-#             "id": modality_id,
-#             "type": mod,
-#             "quantity": count,
-#             "isEnough": is_enough,
-#             "isFixable": is_enough,
-#             "lack": max(0, round(mapper[mod] / 60) - count)
-#         })
-#
-#     for line in non_ok:
-#         modality = line[0]
-#         modality_id = modality_ids.get(modality, None)
-#         minutes_required = round(sum([x['hours_per_week'] for x in doctors_by_modality[modality.lower()]]) / len(doctors_by_modality[modality.lower()])) * 60
-#         docs_required = round(line[1] / minutes_required)
-#         response.append({
-#             "id": modality_id,
-#             "type": modality,
-#             "quantity": docs_used.get(modality, 0),
-#             "isEnough": False,
-#             "isFixable": False,
-#             "lack": docs_required
-#         })
-#
-#     logging.debug(f"Response: {response}")
-#
-#     return jsonify(response), 200
