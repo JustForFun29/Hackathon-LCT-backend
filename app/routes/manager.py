@@ -15,6 +15,8 @@ import json
 from app.ml.predictor import Predictor
 import pandas as pd
 from datetime import time, timedelta
+from app.nn.voice_controller import VoiceController
+
 from flask import request, jsonify, make_response
 import pandas as pd
 import io
@@ -38,10 +40,12 @@ def send_email(to, subject, template):
 # def send_email(to, subject, template):
 #     print(f'{to} {subject} {template}')
 
+
 def generate_random_password(length=12):
     characters = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
     password = ''.join(random.choice(characters) for i in range(length))
     return password
+
 
 @managers_bp.route('/tickets', methods=['GET'])
 @role_and_approval_required('manager')
@@ -61,6 +65,31 @@ def get_tickets():
     return jsonify(result), 200
 
 
+@managers_bp.route('/voice_control', methods=['GET'])
+@role_and_approval_required('manager')
+def voice_control():
+    try:
+        vc = VoiceController()
+        out = {
+            'function': vc.execute()
+        }
+        return jsonify(out), 200
+    except Exception as e:
+        return jsonify({'message': str(e)}), 400
+
+
+@managers_bp.route('/voice_control_wav', methods=['GET'])
+@role_and_approval_required('manager')
+def voice_control_wav():
+    try:
+        vc = VoiceController()
+        out = {
+            'function': vc.execute(input_type='wav', path='app/nn/voice.wav')
+        }
+        return jsonify(out), 200
+    except Exception as e:
+        return jsonify({'message': str(e)}), 400
+
 
 @managers_bp.route('/predict', methods=['POST'])
 @role_and_approval_required('manager')
@@ -69,9 +98,7 @@ def predict():
     {
         'year': 2024,
         'start_week': 1,
-        'end_week': 52,
         'target': 'МРТ с КУ 2 и более зон',
-
     }
     '''
 
@@ -120,6 +147,7 @@ def decline_ticket(ticket_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'message': str(e)}), 400
+
 
 @managers_bp.route('/approve/<uuid:ticket_id>', methods=['PUT'])
 @role_and_approval_required('manager')
@@ -534,7 +562,7 @@ def get_study_counts():
                 predictions[study_type] = 155
             else:
                 target = {
-                    'densitometry': 'Денситометр',
+                    'densitometry': 'Денситометрия',
                     'ct': 'КТ',
                     'ct_with_cu_1_zone': 'КТ с КУ 1 зона',
                     'ct_with_cu_2_or_more_zones': 'КТ с КУ 2 и более зон',
@@ -542,7 +570,7 @@ def get_study_counts():
                     'mrt': 'МРТ',
                     'mrt_with_cu_1_zone': 'МРТ с КУ 1 зона',
                     'rg': 'РГ',
-                    'fluorography': 'Флюорограф'
+                    'fluorography': 'ФЛГ'
                 }[study_type]
 
                 data_for_ml = pd.DataFrame({

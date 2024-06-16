@@ -27,3 +27,10 @@ Werkzeug==3.0.3
 scikit-learn==1.5.0
 pandas==2.2.2
 joblib==1.4.2
+tensorflow-hub==0.16.1
+tensorflow==2.16.1
+torch==2.3.1
+speech_recognition==3.10.4
+sacremoses==0.1.1
+sentencepiece==0.2.0
+h5py==3.11.0

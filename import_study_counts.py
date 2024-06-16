@@ -23,6 +23,7 @@ study_type_mapping = {
     'Флюорограф': 'ФЛГ'
 }
 
+
 # Create the study_count entries
 with app.app_context():
     for _, row in df.iterrows():
