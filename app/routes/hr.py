@@ -21,18 +21,17 @@ def generate_random_password(length=12):
     password = ''.join(random.choice(characters) for i in range(length))
     return password
 
-#TODO: Поменять это на рабочий email
+def send_email(to, subject, template):
+    msg = Message(
+        subject,
+        recipients=[to],
+        html=template,
+        sender="hello@such.ae"
+    )
+    mail.send(msg)
 
 # def send_email(to, subject, template):
-#     msg = Message(
-#         subject,
-#         recipients=[to],
-#         html=template,
-#         sender="hello@such.ae"
-#     )
-#     mail.send(msg)
-def send_email(to, subject, template):
-    print(f'{to} {subject} {template}')
+#     print(f'{to} {subject} {template}')
 
 
 @hr_bp.route('/email', methods=['POST'])
@@ -197,41 +196,3 @@ def propose_doctor_update(doctor_id):
         db.session.rollback()
         return jsonify({'message': str(e)}), 400
 
-
-# @hr_bp.route('/doctor/<uuid:doctor_id>/schedule', methods=['POST'])
-# @role_and_approval_required('hr')
-# def create_schedule(doctor_id):
-#     data = request.get_json()
-#     try:
-#         schedule_entries = data['schedule']
-#         for entry in schedule_entries:
-#             schedule = DoctorSchedule(
-#                 doctor_id=doctor_id,
-#                 date=datetime.strptime(entry['date'], '%Y-%m-%d').date(),
-#                 start_time=datetime.strptime(entry['start_time'], '%H:%M').time(),
-#                 end_time=datetime.strptime(entry['end_time'], '%H:%M').time(),
-#                 break_minutes=entry['break_minutes'],
-#                 hours_worked=entry['hours_worked']
-#             )
-#             db.session.add(schedule)
-#         db.session.commit()
-#         return jsonify({'message': 'Schedule created successfully'}), 201
-#     except Exception as e:
-#         db.session.rollback()
-#         return jsonify({'message': str(e)}), 400
-
-
-# @hr_bp.route('/doctor/<uuid:doctor_id>/schedule/<uuid:schedule_id>', methods=['DELETE'])
-# @role_and_approval_required('hr')
-# def delete_schedule(doctor_id, schedule_id):
-#     try:
-#         schedule = DoctorSchedule.query.get(schedule_id)
-#         if not schedule or schedule.doctor_id != doctor_id:
-#             return jsonify({'message': 'Schedule not found'}), 404
-#
-#         db.session.delete(schedule)
-#         db.session.commit()
-#         return jsonify({'message': 'Schedule deleted successfully'}), 200
-#     except Exception as e:
-#         db.session.rollback()
-#         return jsonify({'message': str(e)}), 400

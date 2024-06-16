@@ -17,6 +17,10 @@ import pandas as pd
 from datetime import time, timedelta
 from app.nn.voice_controller import VoiceController
 
+from flask import request, jsonify, make_response
+import pandas as pd
+import io
+from sqlalchemy.orm import joinedload
 
 # Установим уровень логирования на DEBUG
 logging.basicConfig(level=logging.DEBUG)
@@ -24,20 +28,17 @@ logging.basicConfig(level=logging.DEBUG)
 managers_bp = Blueprint('manager', __name__)
 predictor = Predictor()
 
-
-#TODO: Поменять это на рабочий email
+def send_email(to, subject, template):
+    msg = Message(
+        subject,
+        recipients=[to],
+        html=template,
+        sender=current_app.config['MAIL_DEFAULT_SENDER']
+    )
+    mail.send(msg)
 
 # def send_email(to, subject, template):
-#     msg = Message(
-#         subject,
-#         recipients=[to],
-#         html=template,
-#         sender=current_app.config['MAIL_DEFAULT_SENDER']
-#     )
-#     mail.send(msg)
-
-def send_email(to, subject, template):
-    print(f'{to} {subject} {template}')
+#     print(f'{to} {subject} {template}')
 
 
 def generate_random_password(length=12):
@@ -528,11 +529,22 @@ def delete_schedule(doctor_id, date):
 @managers_bp.route('/study_counts', methods=['GET'])
 @role_and_approval_required('manager')
 def get_study_counts():
-    year = request.args.get('year', type=int)
-    week_number = request.args.get('week_number', type=int)
+    data = request.get_json()
+    start_date_str = data.get('start_date')
 
-    if not year or not week_number:
-        return jsonify({'message': 'Year and week number are required'}), 400
+    if not start_date_str:
+        return jsonify({'message': 'Start date is required'}), 400
+
+    try:
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+    except ValueError:
+        return jsonify({'message': 'Invalid date format, should be YYYY-MM-DD'}), 400
+
+    end_date = start_date + timedelta(days=6)
+    year = start_date.year
+
+    start_week = start_date.isocalendar()[1]
+    end_week = end_date.isocalendar()[1]
 
     study_types = [
         'densitometry', 'ct', 'ct_with_cu_1_zone', 'ct_with_cu_2_or_more_zones',
@@ -540,13 +552,11 @@ def get_study_counts():
         'rg', 'fluorography'
     ]
 
-    study_counts = StudyCount.query.filter_by(year=year, week_number=week_number).all()
+    study_counts = StudyCount.query.filter_by(year=year, week_number=start_week).all()
 
     if not study_counts:
         # If no data is found, call the prediction function
-        result = {study_type: 0 for study_type in study_types}
         predictions = {}
-
         for study_type in study_types:
             if study_type == 'mrt_with_cu_2_or_more_zones':
                 predictions[study_type] = 155
@@ -564,13 +574,13 @@ def get_study_counts():
                 }[study_type]
 
                 data_for_ml = pd.DataFrame({
-                    'Год': [year],
-                    'Номер недели': [week_number],
+                    'Год': [year for _ in range(start_week, end_week + 1)],
+                    'Номер недели': [i for i in range(start_week, end_week + 1)],
                 })
 
                 # Call the prediction function
-                prediction = predictor.predict(target, data_for_ml)[0]
-                predictions[study_type] = prediction
+                prediction = predictor.predict(target, data_for_ml)
+                predictions[study_type] = sum(prediction)  # Summing the predictions over the week
 
         # Return the predictions
         return jsonify(predictions), 200
@@ -580,3 +590,245 @@ def get_study_counts():
         result[study_count.study_type] = study_count.study_count
 
     return jsonify(result), 200
+
+@managers_bp.route('/export_study_counts', methods=['POST'])
+@role_and_approval_required('manager')
+def export_study_counts():
+    data = request.get_json()
+    start_date_str = data.get('start_date')
+    export_format = data.get('format', 'csv')
+
+    if not start_date_str:
+        return jsonify({'message': 'Start date is required'}), 400
+
+    try:
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+    except ValueError:
+        return jsonify({'message': 'Invalid date format, should be YYYY-MM-DD'}), 400
+
+    end_date = start_date + timedelta(days=6)
+    year = start_date.year
+    start_week = start_date.isocalendar()[1]
+    end_week = end_date.isocalendar()[1]
+
+    study_types = [
+        'densitometry', 'ct', 'ct_with_cu_1_zone', 'ct_with_cu_2_or_more_zones',
+        'mmg', 'mrt', 'mrt_with_cu_1_zone', 'mrt_with_cu_2_or_more_zones',
+        'rg', 'fluorography'
+    ]
+
+    study_types_human_readable = {
+        'densitometry': 'Денситометрия',
+        'ct': 'КТ',
+        'ct_with_cu_1_zone': 'КТ с КУ 1 зона',
+        'ct_with_cu_2_or_more_zones': 'КТ с КУ 2 и более зон',
+        'mmg': 'ММГ',
+        'mrt': 'МРТ',
+        'mrt_with_cu_1_zone': 'МРТ с КУ 1 зона',
+        'mrt_with_cu_2_or_more_zones': 'МРТ с КУ 2 и более зон',
+        'rg': 'РГ',
+        'fluorography': 'Флюорография'
+    }
+
+    study_counts = StudyCount.query.filter_by(year=year, week_number=start_week).all()
+
+    if not study_counts:
+        predictions = {}
+        for study_type in study_types:
+            if study_type == 'mrt_with_cu_2_or_more_zones':
+                predictions[study_type] = 155
+            else:
+                target = {
+                    'densitometry': 'Денситометр',
+                    'ct': 'КТ',
+                    'ct_with_cu_1_zone': 'КТ с КУ 1 зона',
+                    'ct_with_cu_2_or_more_zones': 'КТ с КУ 2 и более зон',
+                    'mmg': 'ММГ',
+                    'mrt': 'МРТ',
+                    'mrt_with_cu_1_zone': 'МРТ с КУ 1 зона',
+                    'rg': 'РГ',
+                    'fluorography': 'Флюорограф'
+                }[study_type]
+
+                data_for_ml = pd.DataFrame({
+                    'Год': [year for _ in range(start_week, end_week + 1)],
+                    'Номер недели': [i for i in range(start_week, end_week + 1)],
+                })
+
+                prediction = predictor.predict(target, data_for_ml)
+                predictions[study_type] = round(sum(prediction))
+
+        result_data = {
+            'Год': [year],
+            'Неделя': [start_week],
+        }
+        for study_type, value in predictions.items():
+            result_data[study_types_human_readable[study_type]] = [value]
+    else:
+        result_data = {
+            'Год': [year],
+            'Неделя': [start_week],
+        }
+        for study_count in study_counts:
+            result_data[study_types_human_readable[study_count.study_type]] = [round(study_count.study_count)]
+
+    df = pd.DataFrame(result_data)
+
+    output = io.BytesIO()
+    if export_format == 'excel':
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False)
+        output.seek(0)
+        response = make_response(output.read())
+        response.headers['Content-Disposition'] = 'attachment; filename=study_counts.xlsx'
+        response.headers['Content-type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    else:  # default to CSV
+        df.to_csv(output, index=False)
+        output.seek(0)
+        response = make_response(output.read())
+        response.headers['Content-Disposition'] = 'attachment; filename=study_counts.csv'
+        response.headers['Content-type'] = 'text/csv'
+
+    return response
+
+import logging
+
+# Настройка логирования
+logging.basicConfig(level=logging.DEBUG)
+
+# Маппер для времени выполнения исследований в минутах
+mapper = {
+    'Денситометрия': 15,
+    'КТ': 30,
+    'КТ с КУ 1 зона': 40,
+    'КТ с КУ 2 и более зон': 50,
+    'ММГ': 20,
+    'МРТ': 45,
+    'МРТ с КУ 1 зона': 60,
+    'МРТ с КУ 2 и более зон': 75,
+    'РГ': 10,
+    'ФЛГ': 5
+}
+
+def get_doctors_info():
+    doctors = db.session.query(Doctors).options(
+        joinedload(Doctors.user),
+        joinedload(Doctors.additional_modalities)
+    ).all()
+
+    result = []
+    for doctor in doctors:
+        main_modality = db.session.query(Modality).filter_by(id=doctor.main_modality_id).first()
+        doctor_info = {
+            'id': str(doctor.id),
+            'full_name': doctor.user.full_name,
+            'email': doctor.user.email,
+            'experience': doctor.experience,
+            'main_modality': main_modality.name if main_modality else None,
+            'additional_modalities': [modality.name for modality in doctor.additional_modalities],
+            'gender': doctor.gender,
+            'rate': doctor.rate,
+            'status': doctor.status,
+            'phone': doctor.phone,
+            'hours_per_week': 40
+        }
+        result.append(doctor_info)
+    return result
+
+@managers_bp.route('/analyze_doctors', methods=['POST'])
+@role_and_approval_required('manager')
+def analyze_doctors():
+    data = request.get_json()
+    start_date_str = data.get('start_date')
+
+    logging.debug(f"Received start_date: {start_date_str}")
+
+    if not start_date_str:
+        return jsonify({'message': 'Start date is required'}), 400
+
+    try:
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+        logging.debug(f"Parsed start_date: {start_date}")
+    except ValueError:
+        return jsonify({'message': 'Invalid date format, should be YYYY-MM-DD'}), 400
+
+    end_date = start_date + timedelta(days=6)
+    year = start_date.year
+    start_week = start_date.isocalendar()[1]
+
+    logging.debug(f"Year: {year}, Start Week: {start_week}")
+
+    # Получаем данные о количестве исследований
+    study_counts = StudyCount.query.filter_by(year=year, week_number=start_week).all()
+    logging.debug(f"Study Counts: {study_counts}")
+
+    if not study_counts:
+        study_types = [
+            'Денситометрия', 'КТ', 'КТ с КУ 1 зона', 'КТ с КУ 2 и более зон',
+            'ММГ', 'МРТ', 'МРТ с КУ 1 зона', 'МРТ с КУ 2 и более зон',
+            'РГ', 'ФЛГ'
+        ]
+
+        # Вызов ML модели для прогнозирования
+        predictions = {}
+        for study_type in study_types:
+            if study_type == 'МРТ с КУ 2 и более зон':
+                predictions[study_type] = 155  # Примерное значение для демонстрации
+            else:
+                target = {
+                    'Денситометрия': 'Денситометр',
+                    'КТ': 'КТ',
+                    'КТ с КУ 1 зона': 'КТ с КУ 1 зона',
+                    'КТ с КУ 2 и более зон': 'КТ с КУ 2 и более зон',
+                    'ММГ': 'ММГ',
+                    'МРТ': 'МРТ',
+                    'МРТ с КУ 1 зона': 'МРТ с КУ 1 зона',
+                    'РГ': 'РГ',
+                    'ФЛГ': 'Флюорограф'
+                }[study_type]
+
+                data_for_ml = pd.DataFrame({
+                    'Год': [year for _ in range(start_week, start_week + 1)],  # Прогноз только на текущую неделю
+                    'Номер недели': [start_week for _ in range(start_week, start_week + 1)],
+                })
+
+                # Вызов функции предсказания
+                prediction = predictor.predict(target, data_for_ml)
+                predictions[study_type] = sum(prediction)  # Суммирование прогноза по неделе
+
+        # Используем прогнозы для дальнейших вычислений
+        study_counts = predictions
+
+    # Получаем данные о докторах
+    doctors_info = get_doctors_info()
+    logging.debug(f"Doctors Info: {doctors_info}")
+
+    # Анализируем данные о количестве необходимых докторов
+    response = []
+
+    for study in study_counts:
+        modality = study.study_type if isinstance(study, StudyCount) else study
+        study_count = study.study_count if isinstance(study, StudyCount) else study_counts[study]
+        required_minutes = study_count * mapper[modality]
+        available_doctors = [doc for doc in doctors_info if doc['main_modality'] == modality or modality in doc['additional_modalities']]
+        total_available_minutes = sum([doc['hours_per_week'] * 60 for doc in available_doctors])
+
+        if total_available_minutes >= required_minutes:
+            response.append({
+                "type": modality,
+                "quantity": len(available_doctors),
+                "isEnough": True,
+                "lack": 0
+            })
+        else:
+            doctors_needed = (required_minutes - total_available_minutes) / (40 * 60)  # 40 часов в неделю, 60 минут в час
+            response.append({
+                "type": modality,
+                "quantity": len(available_doctors),
+                "isEnough": False,
+                "lack": max(0, round(doctors_needed))
+            })
+
+    logging.debug(f"Response: {response}")
+
+    return jsonify(response), 200
