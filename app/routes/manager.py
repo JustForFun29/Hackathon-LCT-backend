@@ -15,6 +15,9 @@ import json
 from app.ml.predictor import Predictor
 import pandas as pd
 from datetime import time, timedelta
+from flask import request, jsonify, make_response
+import pandas as pd
+import io
 
 # Установим уровень логирования на DEBUG
 logging.basicConfig(level=logging.DEBUG)
@@ -500,11 +503,22 @@ def delete_schedule(doctor_id, date):
 @managers_bp.route('/study_counts', methods=['GET'])
 @role_and_approval_required('manager')
 def get_study_counts():
-    year = request.args.get('year', type=int)
-    week_number = request.args.get('week_number', type=int)
+    data = request.get_json()
+    start_date_str = data.get('start_date')
 
-    if not year or not week_number:
-        return jsonify({'message': 'Year and week number are required'}), 400
+    if not start_date_str:
+        return jsonify({'message': 'Start date is required'}), 400
+
+    try:
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+    except ValueError:
+        return jsonify({'message': 'Invalid date format, should be YYYY-MM-DD'}), 400
+
+    end_date = start_date + timedelta(days=6)
+    year = start_date.year
+
+    start_week = start_date.isocalendar()[1]
+    end_week = end_date.isocalendar()[1]
 
     study_types = [
         'densitometry', 'ct', 'ct_with_cu_1_zone', 'ct_with_cu_2_or_more_zones',
@@ -512,13 +526,11 @@ def get_study_counts():
         'rg', 'fluorography'
     ]
 
-    study_counts = StudyCount.query.filter_by(year=year, week_number=week_number).all()
+    study_counts = StudyCount.query.filter_by(year=year, week_number=start_week).all()
 
     if not study_counts:
         # If no data is found, call the prediction function
-        result = {study_type: 0 for study_type in study_types}
         predictions = {}
-
         for study_type in study_types:
             if study_type == 'mrt_with_cu_2_or_more_zones':
                 predictions[study_type] = 155
@@ -536,13 +548,13 @@ def get_study_counts():
                 }[study_type]
 
                 data_for_ml = pd.DataFrame({
-                    'Год': [year],
-                    'Номер недели': [week_number],
+                    'Год': [year for _ in range(start_week, end_week + 1)],
+                    'Номер недели': [i for i in range(start_week, end_week + 1)],
                 })
 
                 # Call the prediction function
-                prediction = predictor.predict(target, data_for_ml)[0]
-                predictions[study_type] = prediction
+                prediction = predictor.predict(target, data_for_ml)
+                predictions[study_type] = sum(prediction)  # Summing the predictions over the week
 
         # Return the predictions
         return jsonify(predictions), 200
@@ -552,3 +564,103 @@ def get_study_counts():
         result[study_count.study_type] = study_count.study_count
 
     return jsonify(result), 200
+
+@managers_bp.route('/export_study_counts', methods=['POST'])
+@role_and_approval_required('manager')
+def export_study_counts():
+    data = request.get_json()
+    start_date_str = data.get('start_date')
+    export_format = data.get('format', 'csv')
+
+    if not start_date_str:
+        return jsonify({'message': 'Start date is required'}), 400
+
+    try:
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+    except ValueError:
+        return jsonify({'message': 'Invalid date format, should be YYYY-MM-DD'}), 400
+
+    end_date = start_date + timedelta(days=6)
+    year = start_date.year
+    start_week = start_date.isocalendar()[1]
+    end_week = end_date.isocalendar()[1]
+
+    study_types = [
+        'densitometry', 'ct', 'ct_with_cu_1_zone', 'ct_with_cu_2_or_more_zones',
+        'mmg', 'mrt', 'mrt_with_cu_1_zone', 'mrt_with_cu_2_or_more_zones',
+        'rg', 'fluorography'
+    ]
+
+    study_types_human_readable = {
+        'densitometry': 'Денситометрия',
+        'ct': 'КТ',
+        'ct_with_cu_1_zone': 'КТ с КУ 1 зона',
+        'ct_with_cu_2_or_more_zones': 'КТ с КУ 2 и более зон',
+        'mmg': 'ММГ',
+        'mrt': 'МРТ',
+        'mrt_with_cu_1_zone': 'МРТ с КУ 1 зона',
+        'mrt_with_cu_2_or_more_zones': 'МРТ с КУ 2 и более зон',
+        'rg': 'РГ',
+        'fluorography': 'Флюорография'
+    }
+
+    study_counts = StudyCount.query.filter_by(year=year, week_number=start_week).all()
+
+    if not study_counts:
+        predictions = {}
+        for study_type in study_types:
+            if study_type == 'mrt_with_cu_2_or_more_zones':
+                predictions[study_type] = 155
+            else:
+                target = {
+                    'densitometry': 'Денситометр',
+                    'ct': 'КТ',
+                    'ct_with_cu_1_zone': 'КТ с КУ 1 зона',
+                    'ct_with_cu_2_or_more_zones': 'КТ с КУ 2 и более зон',
+                    'mmg': 'ММГ',
+                    'mrt': 'МРТ',
+                    'mrt_with_cu_1_zone': 'МРТ с КУ 1 зона',
+                    'rg': 'РГ',
+                    'fluorography': 'Флюорограф'
+                }[study_type]
+
+                data_for_ml = pd.DataFrame({
+                    'Год': [year for _ in range(start_week, end_week + 1)],
+                    'Номер недели': [i for i in range(start_week, end_week + 1)],
+                })
+
+                prediction = predictor.predict(target, data_for_ml)
+                predictions[study_type] = round(sum(prediction))
+
+        result_data = {
+            'Год': [year],
+            'Неделя': [start_week],
+        }
+        for study_type, value in predictions.items():
+            result_data[study_types_human_readable[study_type]] = [value]
+    else:
+        result_data = {
+            'Год': [year],
+            'Неделя': [start_week],
+        }
+        for study_count in study_counts:
+            result_data[study_types_human_readable[study_count.study_type]] = [round(study_count.study_count)]
+
+    df = pd.DataFrame(result_data)
+
+    output = io.BytesIO()
+    if export_format == 'excel':
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False)
+        output.seek(0)
+        response = make_response(output.read())
+        response.headers['Content-Disposition'] = 'attachment; filename=study_counts.xlsx'
+        response.headers['Content-type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    else:  # default to CSV
+        df.to_csv(output, index=False)
+        output.seek(0)
+        response = make_response(output.read())
+        response.headers['Content-Disposition'] = 'attachment; filename=study_counts.csv'
+        response.headers['Content-type'] = 'text/csv'
+
+    return response
