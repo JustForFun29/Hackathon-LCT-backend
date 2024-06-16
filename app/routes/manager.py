@@ -18,6 +18,7 @@ from datetime import time, timedelta
 from flask import request, jsonify, make_response
 import pandas as pd
 import io
+from sqlalchemy.orm import joinedload
 
 # Установим уровень логирования на DEBUG
 logging.basicConfig(level=logging.DEBUG)
@@ -664,3 +665,228 @@ def export_study_counts():
         response.headers['Content-type'] = 'text/csv'
 
     return response
+
+import logging
+
+# Настройка логирования
+logging.basicConfig(level=logging.DEBUG)
+
+# Маппер для времени выполнения исследований в минутах
+mapper = {
+    'Денситометрия': 15,
+    'КТ': 30,
+    'КТ с КУ 1 зона': 40,
+    'КТ с КУ 2 и более зон': 50,
+    'ММГ': 20,
+    'МРТ': 45,
+    'МРТ с КУ 1 зона': 60,
+    'МРТ с КУ 2 и более зон': 75,
+    'РГ': 10,
+    'ФЛГ': 5
+}
+
+def get_doctors_info():
+    doctors = db.session.query(Doctors).options(
+        joinedload(Doctors.user),
+        joinedload(Doctors.additional_modalities)
+    ).all()
+
+    result = []
+    for doctor in doctors:
+        main_modality = db.session.query(Modality).filter_by(id=doctor.main_modality_id).first()
+        doctor_info = {
+            'id': str(doctor.id),
+            'full_name': doctor.user.full_name,
+            'email': doctor.user.email,
+            'experience': doctor.experience,
+            'main_modality': main_modality.name if main_modality else None,
+            'additional_modalities': [modality.name for modality in doctor.additional_modalities],
+            'gender': doctor.gender,
+            'rate': doctor.rate,
+            'status': doctor.status,
+            'phone': doctor.phone,
+            'hours_per_week': 40  # Предположим, что каждый доктор работает 40 часов в неделю
+        }
+        result.append(doctor_info)
+    return result
+
+
+@managers_bp.route('/analyze_doctors', methods=['POST'])
+@role_and_approval_required('manager')
+def analyze_doctors():
+    data = request.get_json()
+    start_date_str = data.get('start_date')
+
+    logging.debug(f"Received start_date: {start_date_str}")
+
+    if not start_date_str:
+        return jsonify({'message': 'Start date is required'}), 400
+
+    try:
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+        logging.debug(f"Parsed start_date: {start_date}")
+    except ValueError:
+        return jsonify({'message': 'Invalid date format, should be YYYY-MM-DD'}), 400
+
+    end_date = start_date + timedelta(days=6)
+    year = start_date.year
+    start_week = start_date.isocalendar()[1]
+
+    logging.debug(f"Year: {year}, Start Week: {start_week}")
+
+    # Получаем данные о количестве исследований
+    study_counts = StudyCount.query.filter_by(year=year, week_number=start_week).all()
+    logging.debug(f"Study Counts: {study_counts}")
+
+    if not study_counts:
+        return jsonify({'message': 'No study counts found for the given week'}), 404
+
+    # Получаем данные о докторах
+    doctors_info = get_doctors_info()
+    logging.debug(f"Doctors Info: {doctors_info}")
+
+    # Анализируем данные о количестве необходимых докторов
+    response = []
+
+    for study in study_counts:
+        modality = study.study_type
+        study_count = study.study_count
+        required_minutes = study_count * mapper[modality]
+        available_doctors = [doc for doc in doctors_info if doc['main_modality'] == modality or modality in doc['additional_modalities']]
+        total_available_minutes = sum([doc['hours_per_week'] * 60 for doc in available_doctors])
+
+        if total_available_minutes >= required_minutes:
+            response.append({
+                "type": modality,
+                "quantity": len(available_doctors),
+                "isEnough": True,
+                "lack": 0
+            })
+        else:
+            doctors_needed = (required_minutes - total_available_minutes) / (40 * 60)  # 40 часов в неделю, 60 минут в час
+            response.append({
+                "type": modality,
+                "quantity": len(available_doctors),
+                "isEnough": False,
+                "lack": max(0, round(doctors_needed))
+            })
+
+    logging.debug(f"Response: {response}")
+
+    return jsonify(response), 200
+
+
+# @managers_bp.route('/analyze_doctors', methods=['POST'])
+# @role_and_approval_required('manager')
+# def analyze_doctors():
+#     data = request.get_json()
+#     start_date_str = data.get('start_date')
+#
+#     logging.debug(f"Received start_date: {start_date_str}")
+#
+#     if not start_date_str:
+#         return jsonify({'message': 'Start date is required'}), 400
+#
+#     try:
+#         start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+#         logging.debug(f"Parsed start_date: {start_date}")
+#     except ValueError:
+#         return jsonify({'message': 'Invalid date format, should be YYYY-MM-DD'}), 400
+#
+#     end_date = start_date + timedelta(days=6)
+#     year = start_date.year
+#     start_week = start_date.isocalendar()[1]
+#     end_week = end_date.isocalendar()[1]
+#
+#     logging.debug(f"Year: {year}, Start Week: {start_week}, End Week: {end_week}")
+#
+#     study_types_human_readable = {
+#         'densitometry': 'Денситометрия',
+#         'ct': 'КТ',
+#         'ct_with_cu_1_zone': 'КТ с КУ 1 зона',
+#         'ct_with_cu_2_or_more_zones': 'КТ с КУ 2 и более зон',
+#         'mmg': 'ММГ',
+#         'mrt': 'МРТ',
+#         'mrt_with_cu_1_zone': 'МРТ с КУ 1 зона',
+#         'mrt_with_cu_2_or_more_zones': 'МРТ с КУ 2 и более зон',
+#         'rg': 'РГ',
+#         'fluorography': 'Флюорография'
+#     }
+#
+#     study_counts = StudyCount.query.filter_by(year=year, week_number=start_week).all()
+#
+#     logging.debug(f"Study Counts: {study_counts}")
+#
+#     if not study_counts:
+#         return jsonify({'message': 'No study counts found for the given week'}), 404
+#
+#     # Получаем данные о докторах
+#     doctors_info = get_doctors_info()
+#     logging.debug(f"Doctors Info: {doctors_info}")
+#
+#     doctors_by_modality = {}
+#     for doctor in doctors_info:
+#         modalities = [doctor['main_modality'].lower()] + [mod.lower() for mod in doctor['additional_modalities']]
+#         for modality in modalities:
+#             if modality not in doctors_by_modality:
+#                 doctors_by_modality[modality] = []
+#             doctors_by_modality[modality].append(doctor)
+#
+#     logging.debug(f"Doctors by Modality: {doctors_by_modality}")
+#
+#     # Анализируем данные
+#     mods = [(study.study_type.lower(), study.study_count) for study in study_counts]
+#     docs_used = {}
+#     non_ok = []
+#
+#     for mod in mods:
+#         modality = study_types_human_readable.get(mod[0], mod[0])
+#         if modality not in mapper:
+#             continue
+#         minutes_left = mod[1] * mapper[modality]
+#         c = 0
+#         for doc in doctors_by_modality.get(modality.lower(), []):
+#             c += 1
+#             minutes_left -= doc['hours_per_week'] * 60
+#             if minutes_left <= 0:
+#                 break
+#         docs_used[modality] = c
+#
+#         if minutes_left > 0:
+#             non_ok.append((modality, minutes_left))
+#
+#     logging.debug(f"Docs Used: {docs_used}")
+#     logging.debug(f"Non-OK: {non_ok}")
+#
+#     response = []
+#     modality_ids = {v: k for k, v in enumerate(study_types_human_readable.values(), 1)}
+#
+#     for mod, count in docs_used.items():
+#         modality_id = modality_ids.get(mod, None)
+#         is_enough = count >= mapper[mod] / 60
+#         response.append({
+#             "id": modality_id,
+#             "type": mod,
+#             "quantity": count,
+#             "isEnough": is_enough,
+#             "isFixable": is_enough,
+#             "lack": max(0, round(mapper[mod] / 60) - count)
+#         })
+#
+#     for line in non_ok:
+#         modality = line[0]
+#         modality_id = modality_ids.get(modality, None)
+#         minutes_required = round(sum([x['hours_per_week'] for x in doctors_by_modality[modality.lower()]]) / len(doctors_by_modality[modality.lower()])) * 60
+#         docs_required = round(line[1] / minutes_required)
+#         response.append({
+#             "id": modality_id,
+#             "type": modality,
+#             "quantity": docs_used.get(modality, 0),
+#             "isEnough": False,
+#             "isFixable": False,
+#             "lack": docs_required
+#         })
+#
+#     logging.debug(f"Response: {response}")
+#
+#     return jsonify(response), 200

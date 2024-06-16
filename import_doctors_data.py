@@ -17,21 +17,6 @@ session = Session()
 # Пароль по умолчанию для всех врачей
 default_password = '123456'
 
-# Словарь для сопоставления модальностей
-modality_mapping = {
-    "МРТ": "MRT",
-    "КТ с КУ 2 и более зон": "CT with CU 2 or more zones",
-    "РГ": "RG",
-    "КТ с КУ 1 зона": "CT with CU 1 zone",
-    "ФЛГ": "FLG",
-    "ММГ": "MMG",
-    "КТ": "CT",
-    "Денситометрия": "Densitometry",
-    "МРТ с КУ 1 зона": "MRT with CU 1 zone",
-    "МРТ с КУ 2 и более зон": "MRT with CU 2 or more zones"
-}
-
-
 # Функция для создания или получения модальности
 def get_or_create_modality(name):
     modality = session.query(Modality).filter_by(name=name).first()
@@ -41,13 +26,18 @@ def get_or_create_modality(name):
         session.commit()
     return modality
 
-
 # Загрузка данных из JSON файла
 with open(json_file_path, 'r', encoding='utf-8') as file:
     doctors_data = json.load(file)
 
 # Обработка данных
 for doctor_data in doctors_data:
+    # Проверка на существование пользователя с таким же email
+    existing_user = session.query(Users).filter_by(email=doctor_data['email']).first()
+    if existing_user:
+        print(f"Пользователь с email {doctor_data['email']} уже существует. Пропуск.")
+        continue
+
     # Создание пользователя
     user = Users(
         full_name=doctor_data['name'],
@@ -60,7 +50,7 @@ for doctor_data in doctors_data:
     session.commit()
 
     # Получение основной модальности
-    main_modality = get_or_create_modality(modality_mapping[doctor_data['main_modality']])
+    main_modality = get_or_create_modality(doctor_data['main_modality'])
 
     # Создание врача
     doctor = Doctors(
@@ -76,7 +66,7 @@ for doctor_data in doctors_data:
 
     # Добавление дополнительных модальностей
     for additional_modality_name in doctor_data['additional_modalities']:
-        additional_modality = get_or_create_modality(modality_mapping[additional_modality_name])
+        additional_modality = get_or_create_modality(additional_modality_name)
         doctor.additional_modalities.append(additional_modality)
 
     session.commit()
