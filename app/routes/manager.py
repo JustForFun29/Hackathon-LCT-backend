@@ -392,8 +392,8 @@ def update_doctor(doctor_id):
 
 @managers_bp.route('/doctors', methods=['GET'])
 @role_and_approval_required('manager', 'hr')
-def get_all_doctors():
-    doctors = Doctors.query.all()
+def get_first_50_doctors():
+    doctors = Doctors.query.limit(50).all()
     result = []
     for doctor in doctors:
         user = Users.query.get(doctor.user_id)
@@ -520,9 +520,9 @@ def get_study_counts():
     end_week = end_date.isocalendar()[1]
 
     study_types = [
-        'densitometry', 'ct', 'ct_with_cu_1_zone', 'ct_with_cu_2_or_more_zones',
-        'mmg', 'mrt', 'mrt_with_cu_1_zone', 'mrt_with_cu_2_or_more_zones',
-        'rg', 'fluorography'
+        'Денситометрия', 'КТ', 'КТ с КУ 1 зона', 'КТ с КУ 2 и более зон',
+        'ММГ', 'МРТ', 'МРТ с КУ 1 зона', 'МРТ с КУ 2 и более зон',
+        'РГ', 'ФЛГ'
     ]
 
     study_counts = StudyCount.query.filter_by(year=year, week_number=start_week).all()
@@ -531,19 +531,17 @@ def get_study_counts():
         # If no data is found, call the prediction function
         predictions = {}
         for study_type in study_types:
-            if study_type == 'mrt_with_cu_2_or_more_zones':
-                predictions[study_type] = 155
-            else:
                 target = {
-                    'densitometry': 'Денситометрия',
-                    'ct': 'КТ',
-                    'ct_with_cu_1_zone': 'КТ с КУ 1 зона',
-                    'ct_with_cu_2_or_more_zones': 'КТ с КУ 2 и более зон',
-                    'mmg': 'ММГ',
-                    'mrt': 'МРТ',
-                    'mrt_with_cu_1_zone': 'МРТ с КУ 1 зона',
-                    'rg': 'РГ',
-                    'fluorography': 'ФЛГ'
+                    'Денситометрия': 'Денситометрия',
+                    'КТ': 'КТ',
+                    'КТ с КУ 1 зона': 'КТ с КУ 1 зона',
+                    'КТ с КУ 2 и более зон': 'КТ с КУ 2 и более зон',
+                    'ММГ': 'ММГ',
+                    'МРТ': 'МРТ',
+                    'МРТ с КУ 1 зона': 'МРТ с КУ 1 зона',
+                    'МРТ с КУ 2 и более зон': "МРТ с КУ 2 и более зон",
+                    'РГ': 'РГ',
+                    'ФЛГ': 'ФЛГ'
                 }[study_type]
 
                 data_for_ml = pd.DataFrame({
@@ -749,7 +747,7 @@ def analyze_doctors():
                 predictions[study_type] = 155  # Примерное значение для демонстрации
             else:
                 target = {
-                    'Денситометрия': 'Денситометр',
+                    'Денситометрия': 'Денситометрия',
                     'КТ': 'КТ',
                     'КТ с КУ 1 зона': 'КТ с КУ 1 зона',
                     'КТ с КУ 2 и более зон': 'КТ с КУ 2 и более зон',
@@ -757,7 +755,7 @@ def analyze_doctors():
                     'МРТ': 'МРТ',
                     'МРТ с КУ 1 зона': 'МРТ с КУ 1 зона',
                     'РГ': 'РГ',
-                    'ФЛГ': 'Флюорограф'
+                    'ФЛГ': 'ФЛГ'
                 }[study_type]
 
                 data_for_ml = pd.DataFrame({
